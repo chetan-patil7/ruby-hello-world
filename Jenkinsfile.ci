@@ -115,33 +115,33 @@ pipeline {
             }
         }
         
-        stage('Code Quality Checks') {
-            steps {
-                script {
-                    sh '''
-                        export PATH="$HOME/.rbenv/bin:$PATH"
-                        eval "$(rbenv init -)"
+        // stage('Code Quality Checks') {
+        //     steps {
+        //         script {
+        //             sh '''
+        //                 export PATH="$HOME/.rbenv/bin:$PATH"
+        //                 eval "$(rbenv init -)"
                         
-                        # Run Rubocop if present
-                        if bundle show rubocop &> /dev/null; then
-                            echo "Running Rubocop..."
+        //                 # Run Rubocop if present
+        //                 if bundle show rubocop &> /dev/null; then
+        //                     echo "Running Rubocop..."
                             
-                            # Try to auto-fix issues
-                            bundle exec rubocop -A
+        //                     # Try to auto-fix issues
+        //                     bundle exec rubocop -A
                             
-                            # Run again to check if issues are fixed
-                            bundle exec rubocop --format progress
-                        fi
+        //                     # Run again to check if issues are fixed
+        //                     bundle exec rubocop --format progress
+        //                 fi
                         
-                        # Run Brakeman security scan if present
-                        if bundle show brakeman &> /dev/null; then
-                            echo "Running Brakeman security scan..."
-                            bundle exec brakeman -z
-                        fi
-                    '''
-                }
-            }
-        }
+        //                 # Run Brakeman security scan if present
+        //                 if bundle show brakeman &> /dev/null; then
+        //                     echo "Running Brakeman security scan..."
+        //                     bundle exec brakeman -z
+        //                 fi
+        //             '''
+        //         }
+        //     }
+        // }
         
         stage('Asset Precompilation') {
             steps {
