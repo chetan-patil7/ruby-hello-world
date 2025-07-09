@@ -23,7 +23,6 @@ pipeline {
     }
     
     stages {
-    stages {
         stage('Manual Approval') {
             steps {
                 script {
@@ -552,5 +551,4 @@ EOF
             }
         }
     }
-}
 }
