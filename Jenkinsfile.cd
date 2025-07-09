@@ -19,6 +19,9 @@ pipeline {
         BUNDLER_VERSION = '2.3.0'
         DEPLOY_USER = 'deploy'
         APP_NAME = 'hello-world-app'
+        DB_USERNAME = credentials('db-username')
+        DB_PASSWORD = credentials('db-password')
+        SECRET_KEY_BASE = credentials('rails-secret-key-base')
     }
     
     stages {
