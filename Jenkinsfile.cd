@@ -514,6 +514,11 @@ EOF
                     if (userChoice.USERNAME) {
                         dir('ansible') {
                             sh """
+                                # Load Ansible path
+                                source /tmp/ansible_env
+                                ANSIBLE_BINARY=\$(cat /tmp/ansible_path)
+                                ANSIBLE_PLAYBOOK_BINARY="\$(dirname \$ANSIBLE_BINARY)/ansible-playbook"
+                                
                                 echo "Creating user: ${userChoice.USERNAME}"
                                 echo "Access level: ${userChoice.ACCESS_LEVEL}"
                                 echo "Copy SSH: ${userChoice.COPY_SSH_KEY}"
@@ -525,8 +530,90 @@ user_access_level: ${userChoice.ACCESS_LEVEL}
 copy_ssh_key: ${userChoice.COPY_SSH_KEY}
 EOF
                                 
+                                # Check if create-user playbook exists, if not create a basic one
+                                if [ ! -f "playbooks/create-user.yml" ]; then
+                                    echo "Creating create-user.yml playbook..."
+                                    cat > playbooks/create-user.yml << 'EOF2'
+---
+- name: Create User with Access Control
+  hosts: webservers
+  become: yes
+  
+  tasks:
+    - name: Create user groups (if not exist)
+      group:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - admin_group
+        - ops_group
+        - readonly_group
+
+    - name: Determine user group based on access level
+      set_fact:
+        user_group: "{{ 'admin_group' if user_access_level == '1' else 'ops_group' if user_access_level == '2' else 'readonly_group' }}"
+
+    - name: Create user
+      user:
+        name: "{{ new_username }}"
+        shell: /bin/bash
+        groups: "{{ user_group }}"
+        append: yes
+        create_home: yes
+        state: present
+
+    - name: Setup SSH directory for new user
+      file:
+        path: "/home/{{ new_username }}/.ssh"
+        state: directory
+        owner: "{{ new_username }}"
+        group: "{{ new_username }}"
+        mode: '0700'
+      when: copy_ssh_key | bool
+
+    - name: Copy SSH key from deploy user
+      copy:
+        src: "/home/{{ deploy_user }}/.ssh/authorized_keys"
+        dest: "/home/{{ new_username }}/.ssh/authorized_keys"
+        owner: "{{ new_username }}"
+        group: "{{ new_username }}"
+        mode: '0600'
+        remote_src: yes
+      when: copy_ssh_key | bool
+
+    - name: Setup basic sudoers for groups
+      lineinfile:
+        path: /etc/sudoers.d/user_access
+        line: "{{ item }}"
+        create: yes
+        mode: '0440'
+      loop:
+        - "# User access control"
+        - "%admin_group ALL=(ALL) NOPASSWD: ALL"
+        - "%ops_group ALL=(ALL) NOPASSWD: ALL, !/bin/rm, !/bin/rmdir, !/usr/bin/rm, !/usr/bin/rmdir"
+        - "%readonly_group ALL=(ALL) NOPASSWD: /bin/cat, /bin/less, /bin/ls, /usr/bin/tail, /usr/bin/head"
+
+    - name: Display user creation result
+      debug:
+        msg: |
+          ✅ User '{{ new_username }}' created successfully!
+          👥 Group: {{ user_group }}
+          🔑 SSH Access: {{ 'Enabled' if copy_ssh_key | bool else 'Disabled' }}
+          🔗 Login: ssh {{ new_username }}@{{ ansible_host }}
+          
+          📋 Access Level Details:
+          {% if user_access_level == '1' %}
+          🔴 ADMIN: Full system access - use with caution!
+          {% elif user_access_level == '2' %}
+          🟡 OPERATIONS: Can read/write but not delete files (rm blocked)
+          {% else %}
+          🟢 READ-ONLY: Can only view files and directories
+          {% endif %}
+EOF2
+                                fi
+                                
                                 # Run user creation playbook
-                                ansible-playbook -i inventories/${ENVIRONMENT}/hosts playbooks/create-user.yml \
+                                \$ANSIBLE_PLAYBOOK_BINARY -i inventories/${ENVIRONMENT}/hosts playbooks/create-user.yml \
                                     --extra-vars @user_vars.yml \
                                     -v
                             """
