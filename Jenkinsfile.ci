@@ -124,11 +124,16 @@ pipeline {
                         
                         # Run Rubocop if present
                         if bundle show rubocop &> /dev/null; then
+                            echo "Running Rubocop..."
                             bundle exec rubocop --format progress
+                            
+                            # Optionally auto-fix issues (uncomment if desired)
+                            # bundle exec rubocop -A
                         fi
                         
                         # Run Brakeman security scan if present
                         if bundle show brakeman &> /dev/null; then
+                            echo "Running Brakeman security scan..."
                             bundle exec brakeman -z
                         fi
                     '''
