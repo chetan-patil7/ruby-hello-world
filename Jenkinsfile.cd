@@ -32,11 +32,14 @@ pipeline {
                         deploymentMessage = "⚠️ PRODUCTION DEPLOYMENT ⚠️\n\nAre you sure you want to deploy to PRODUCTION?\n\nBuild: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}"
                     }
                     
-                    input message: deploymentMessage,
-                          ok: "Deploy to ${params.ENVIRONMENT}",
-                          submitterParameter: 'APPROVER'
+                    def approver = input message: deploymentMessage,
+                                        ok: "Deploy to ${params.ENVIRONMENT}",
+                                        submitterParameter: 'APPROVER'
                     
-                    echo "Deployment approved by: ${APPROVER}"
+                    // Store approver in environment variable
+                    env.DEPLOYMENT_APPROVER = approver ?: 'unknown'
+                    
+                    echo "Deployment approved by: ${env.DEPLOYMENT_APPROVER}"
                     echo "Deploying to: ${params.ENVIRONMENT}"
                     echo "Build to deploy: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}"
                 }
@@ -55,9 +58,9 @@ pipeline {
                     echo "Attempting to copy artifacts from: ${ciJobName}"
                     echo "Build number: ${buildNumber ?: 'latest successful'}"
                     
-                    if (buildNumber) {
-                        // Copy artifact from specific build
-                        try {
+                    try {
+                        if (buildNumber) {
+                            // Copy artifact from specific build
                             copyArtifacts(
                                 projectName: ciJobName,
                                 selector: specific(buildNumber),
@@ -65,13 +68,8 @@ pipeline {
                                 fingerprintArtifacts: true
                             )
                             echo "✅ Successfully copied artifact from build ${buildNumber}"
-                        } catch (Exception e) {
-                            echo "❌ Failed to copy artifact from build ${buildNumber}: ${e.message}"
-                            error("Could not find artifact from build ${buildNumber}")
-                        }
-                    } else {
-                        // Copy artifact from latest successful build
-                        try {
+                        } else {
+                            // Copy artifact from latest successful build
                             copyArtifacts(
                                 projectName: ciJobName,
                                 selector: lastSuccessful(),
@@ -79,10 +77,11 @@ pipeline {
                                 fingerprintArtifacts: true
                             )
                             echo "✅ Successfully copied artifact from latest successful build"
-                        } catch (Exception e) {
-                            echo "❌ Failed to copy artifact from latest build: ${e.message}"
-                            error("Could not find any artifacts from CI pipeline")
                         }
+                    } catch (Exception e) {
+                        echo "❌ Failed to copy artifact: ${e.message}"
+                        echo "Make sure the 'Copy Artifact Plugin' is installed and the CI job '${ciJobName}' exists with artifacts"
+                        error("Artifact copying failed: ${e.message}")
                     }
                     
                     // Verify artifact was copied
@@ -448,6 +447,7 @@ EOF
                                     <p><strong>Environment:</strong> ${params.ENVIRONMENT}</p>
                                     <p><strong>Build Number:</strong> ${env.BUILD_NUMBER}</p>
                                     <p><strong>Deployed At:</strong> ${new Date()}</p>
+                                    <p><strong>Approved By:</strong> ${env.DEPLOYMENT_APPROVER}</p>
                                     <p><strong>Jenkins Job:</strong> ${env.JOB_NAME}</p>
                                 """,
                                 to: "team@company.com",
