@@ -23,13 +23,21 @@ pipeline {
     }
     
     stages {
-        stage('Validate Parameters') {
+    stages {
+        stage('Manual Approval') {
             steps {
                 script {
+                    // Manual approval for any deployment
+                    def deploymentMessage = "Deploy to ${params.ENVIRONMENT}?"
                     if (params.ENVIRONMENT == 'production') {
-                        input message: 'Are you sure you want to deploy to PRODUCTION?', ok: 'Deploy'
+                        deploymentMessage = "⚠️ PRODUCTION DEPLOYMENT ⚠️\n\nAre you sure you want to deploy to PRODUCTION?\n\nBuild: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}"
                     }
                     
+                    input message: deploymentMessage,
+                          ok: "Deploy to ${params.ENVIRONMENT}",
+                          submitterParameter: 'APPROVER'
+                    
+                    echo "Deployment approved by: ${APPROVER}"
                     echo "Deploying to: ${params.ENVIRONMENT}"
                     echo "Build to deploy: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}"
                 }
@@ -39,19 +47,57 @@ pipeline {
         stage('Download Artifact') {
             steps {
                 script {
-                    if (params.BUILD_NUMBER_TO_DEPLOY) {
-                        copyArtifacts(
-                            projectName: env.JOB_NAME.replace('.cd', '.ci'),
-                            selector: specific(params.BUILD_NUMBER_TO_DEPLOY),
-                            filter: 'hello-world-app-*.tar.gz'
-                        )
+                    // Clean workspace first
+                    cleanWs()
+                    
+                    def buildNumber = params.BUILD_NUMBER_TO_DEPLOY ?: ''
+                    def ciJobName = 'hello-world-app-ci'
+                    
+                    echo "Attempting to copy artifacts from: ${ciJobName}"
+                    echo "Build number: ${buildNumber ?: 'latest successful'}"
+                    
+                    if (buildNumber) {
+                        // Copy artifact from specific build
+                        try {
+                            copyArtifacts(
+                                projectName: ciJobName,
+                                selector: specific(buildNumber),
+                                filter: 'hello-world-app-*.tar.gz',
+                                fingerprintArtifacts: true
+                            )
+                            echo "✅ Successfully copied artifact from build ${buildNumber}"
+                        } catch (Exception e) {
+                            echo "❌ Failed to copy artifact from build ${buildNumber}: ${e.message}"
+                            error("Could not find artifact from build ${buildNumber}")
+                        }
                     } else {
-                        copyArtifacts(
-                            projectName: env.JOB_NAME.replace('.cd', '.ci'),
-                            selector: lastSuccessful(),
-                            filter: 'hello-world-app-*.tar.gz'
-                        )
+                        // Copy artifact from latest successful build
+                        try {
+                            copyArtifacts(
+                                projectName: ciJobName,
+                                selector: lastSuccessful(),
+                                filter: 'hello-world-app-*.tar.gz',
+                                fingerprintArtifacts: true
+                            )
+                            echo "✅ Successfully copied artifact from latest successful build"
+                        } catch (Exception e) {
+                            echo "❌ Failed to copy artifact from latest build: ${e.message}"
+                            error("Could not find any artifacts from CI pipeline")
+                        }
                     }
+                    
+                    // Verify artifact was copied
+                    sh '''
+                        if ls hello-world-app-*.tar.gz 1> /dev/null 2>&1; then
+                            echo "✅ Artifact files found:"
+                            ls -la hello-world-app-*.tar.gz
+                        else
+                            echo "❌ No artifact files found!"
+                            echo "Files in current directory:"
+                            ls -la
+                            exit 1
+                        fi
+                    '''
                 }
             }
         }
@@ -356,8 +402,6 @@ EOF
                 }
             }
         }
-        
-       
         
         stage('Cleanup Old Releases') {
             steps {

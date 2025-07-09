@@ -168,12 +168,16 @@ pipeline {
                             --exclude='log' \
                             --exclude='node_modules' \
                             --exclude='coverage' \
+                            --exclude='.jenkins' \
+                            --exclude='*.log' \
                             .
                     '''
                 }
                 
-                // Archive the artifact
-                archiveArtifacts artifacts: 'hello-world-app-*.tar.gz', fingerprint: true
+                // Archive the artifact with proper configuration
+                archiveArtifacts artifacts: 'hello-world-app-*.tar.gz', 
+                                fingerprint: true,
+                                allowEmptyArchive: false
             }
         }
     }
@@ -189,13 +193,31 @@ pipeline {
                 '''
             }
             
-            // Clean workspace
-            cleanWs()
+            // Clean workspace but keep artifacts
+            cleanWs(cleanWhenNotBuilt: false,
+                    deleteDirs: true,
+                    disableDeferredWipeout: true,
+                    notFailBuild: true,
+                    patterns: [[pattern: 'hello-world-app-*.tar.gz', type: 'EXCLUDE']])
         }
         
         success {
             echo 'CI Pipeline completed successfully!'
-            // You can add notifications here
+            
+            // Trigger CD pipeline with manual approval
+            script {
+                try {
+                    build job: 'hello-world-app-cd', 
+                          parameters: [
+                              string(name: 'BUILD_NUMBER_TO_DEPLOY', value: env.BUILD_NUMBER),
+                              choice(name: 'ENVIRONMENT', value: 'staging')
+                          ],
+                          wait: false
+                } catch (Exception e) {
+                    echo "CD pipeline trigger failed: ${e.message}"
+                    echo "You can manually trigger the CD pipeline with build number: ${env.BUILD_NUMBER}"
+                }
+            }
         }
         
         failure {
