@@ -125,7 +125,7 @@ pipeline {
                             ssh -i $SSH_KEY -o StrictHostKeyChecking=no $SSH_USER@$EC2_HOST "
                                 sudo mkdir -p $RELEASE_DIR
                                 sudo mkdir -p ${DEPLOY_PATH}/${ENVIRONMENT}/shared/{log,tmp,config}
-                                sudo chown -R ${DEPLOY_USER}:${DEPLOY_USER} ${DEPLOY_PATH}
+                                sudo chown -R ubuntu:ubuntu ${DEPLOY_PATH}
                             "
                             
                             # Upload and extract application
@@ -136,20 +136,20 @@ pipeline {
                                 tar -xzf /tmp/$ARTIFACT_FILE --strip-components=1
                                 
                                 # Generate Rails secret key
-                                export PATH=\"\\$HOME/.rbenv/bin:\\$PATH\"
-                                eval \"\\$(rbenv init -)\"
+                                export PATH=\\$HOME/.rbenv/bin:\\$PATH
+                                eval \\$(rbenv init -)
                                 GENERATED_SECRET=\\$(bundle exec rails secret)
                                 
                                 # Create environment file
-                                cat > .env.${ENVIRONMENT} << EOF
+                                cat > .env.${ENVIRONMENT} << 'EOL'
 RAILS_ENV=${ENVIRONMENT}
 DATABASE_URL=${DATABASE_URL}
 SECRET_KEY_BASE=\\$GENERATED_SECRET
 RAILS_LOG_TO_STDOUT=true
 RAILS_SERVE_STATIC_FILES=true
-EOF
+EOL
                                 
-                                echo \"Generated new Rails secret key for ${ENVIRONMENT}\"
+                                echo Generated new Rails secret key for ${ENVIRONMENT}
                                 
                                 # Install gems
                                 bundle install --deployment --without development test
@@ -166,7 +166,7 @@ EOF
                                 bundle exec rake assets:precompile
                                 
                                 # Update current symlink
-                                ln -sfn $RELEASE_DIR $CURRENT_DIR
+                                sudo ln -sfn $RELEASE_DIR $CURRENT_DIR
                                 
                                 # Restart application
                                 pkill -f 'rails server' || true
@@ -175,9 +175,9 @@ EOF
                                 
                                 # Cleanup old releases (keep last 5)
                                 cd ${DEPLOY_PATH}/${ENVIRONMENT}/releases
-                                ls -t | tail -n +6 | xargs -r rm -rf
+                                sudo ls -t | tail -n +6 | xargs -r sudo rm -rf
                                 
-                                echo 'Deployment completed successfully!'
+                                echo Deployment completed successfully!
                             "
                             
                             # Clean up local artifact
