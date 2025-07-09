@@ -125,10 +125,12 @@ pipeline {
                         # Run Rubocop if present
                         if bundle show rubocop &> /dev/null; then
                             echo "Running Rubocop..."
-                            bundle exec rubocop --format progress
                             
-                            # Optionally auto-fix issues (uncomment if desired)
-                            # bundle exec rubocop -A
+                            # Try to auto-fix issues
+                            bundle exec rubocop -A
+                            
+                            # Run again to check if issues are fixed
+                            bundle exec rubocop --format progress
                         fi
                         
                         # Run Brakeman security scan if present
