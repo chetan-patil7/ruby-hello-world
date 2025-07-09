@@ -275,11 +275,72 @@ EOF
                 script {
                     dir('ansible') {
                         sh '''
-                            # Set up PATH for Ansible
-                            export PATH="$HOME/Library/Python/3.9/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+                            # Load Ansible path
+                            source /tmp/ansible_env
+                            ANSIBLE_BINARY=$(cat /tmp/ansible_path)
+                            ANSIBLE_PLAYBOOK_BINARY="$(dirname $ANSIBLE_BINARY)/ansible-playbook"
                             
                             echo "Running initial server setup..."
-                            ansible-playbook -i inventories/${ENVIRONMENT}/hosts playbooks/setup-server.yml -v
+                            
+                            # Check if setup playbook exists, if not create a basic one
+                            if [ ! -f "playbooks/setup-server.yml" ]; then
+                                echo "Creating setup-server.yml playbook..."
+                                cat > playbooks/setup-server.yml << 'EOF'
+---
+- name: Initial Server Setup
+  hosts: webservers
+  become: yes
+  
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install system dependencies
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - build-essential
+          - python3
+          - unzip
+        state: present
+
+    - name: Create deployment directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: '0755'
+      loop:
+        - "{{ deploy_path }}"
+        - "{{ deploy_path }}/{{ rails_env }}"
+        - "{{ deploy_path }}/{{ rails_env }}/releases"
+        - "{{ deploy_path }}/{{ rails_env }}/shared"
+        - "{{ deploy_path }}/{{ rails_env }}/current"
+
+    - name: Ensure deploy user exists
+      user:
+        name: "{{ deploy_user }}"
+        shell: /bin/bash
+        create_home: yes
+        state: present
+
+    - name: Set proper ownership
+      file:
+        path: "{{ deploy_path }}"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        state: directory
+        recurse: yes
+EOF
+                            fi
+                            
+                            # Run setup playbook
+                            $ANSIBLE_PLAYBOOK_BINARY -i inventories/${ENVIRONMENT}/hosts playbooks/setup-server.yml -v
                             
                             if [ $? -eq 0 ]; then
                                 echo "✅ Server setup completed successfully"
