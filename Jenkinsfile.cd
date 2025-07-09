@@ -12,21 +12,31 @@ pipeline {
             defaultValue: '',
             description: 'Build number from CI pipeline to deploy (leave empty for latest)'
         )
+        booleanParam(
+            name: 'SKIP_SERVER_SETUP',
+            defaultValue: true,
+            description: 'Skip server setup (uncheck for first deployment)'
+        )
+        choice(
+            name: 'POST_DEPLOY_ACTION',
+            choices: ['none', 'create_user'],
+            description: 'Action to perform after deployment'
+        )
     }
     
     environment {
         APP_NAME = 'hello-world-app'
-        DEPLOY_USER = 'deploy'
-        DEPLOY_PATH = '/var/www/hello-world-app'
+        ANSIBLE_HOST_KEY_CHECKING = 'False'
+        ANSIBLE_STDOUT_CALLBACK = 'yaml'
     }
     
     stages {
         stage('Manual Approval') {
             steps {
                 script {
-                    def deploymentMessage = "Deploy to ${params.ENVIRONMENT}?"
+                    def deploymentMessage = "Deploy to ${params.ENVIRONMENT} using Ansible?"
                     if (params.ENVIRONMENT == 'production') {
-                        deploymentMessage = "⚠️ PRODUCTION DEPLOYMENT ⚠️\n\nAre you sure you want to deploy to PRODUCTION?\n\nBuild: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}"
+                        deploymentMessage = "⚠️ PRODUCTION DEPLOYMENT ⚠️\n\nAre you sure you want to deploy to PRODUCTION?\n\nBuild: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}\nMethod: Ansible automation"
                     }
                     
                     def approver = input message: deploymentMessage,
@@ -38,6 +48,8 @@ pipeline {
                     echo "Deployment approved by: ${env.DEPLOYMENT_APPROVER}"
                     echo "Deploying to: ${params.ENVIRONMENT}"
                     echo "Build to deploy: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}"
+                    echo "Server setup: ${params.SKIP_SERVER_SETUP ? 'Skip' : 'Run'}"
+                    echo "Post-deploy action: ${params.POST_DEPLOY_ACTION}"
                 }
             }
         }
@@ -51,217 +63,193 @@ pipeline {
                     def ciJobName = 'hello-rails'
                     
                     echo "Downloading artifact from: ${ciJobName}"
-                    echo "Build number: ${buildNumber ?: 'latest successful'}"
                     
                     try {
                         if (buildNumber) {
-                            // Copy artifact from specific build
                             step([$class: 'CopyArtifact',
                                   projectName: ciJobName,
                                   selector: [$class: 'SpecificBuildSelector', buildNumber: buildNumber],
                                   filter: 'hello-world-app-*.tar.gz',
                                   fingerprintArtifacts: true])
-                            echo "✅ Artifact downloaded from build ${buildNumber}"
                         } else {
-                            // Copy artifact from latest successful build
                             step([$class: 'CopyArtifact',
                                   projectName: ciJobName,
                                   selector: [$class: 'StatusBuildSelector', stable: false],
                                   filter: 'hello-world-app-*.tar.gz',
                                   fingerprintArtifacts: true])
-                            echo "✅ Artifact downloaded from latest successful build"
                         }
                         
-                        // Verify artifact was downloaded
                         sh '''
                             if ls hello-world-app-*.tar.gz 1> /dev/null 2>&1; then
                                 echo "✅ Artifact files found:"
                                 ls -la hello-world-app-*.tar.gz
                             else
                                 echo "❌ No artifact files found!"
-                                echo "Available files:"
-                                ls -la
                                 exit 1
                             fi
                         '''
                         
                     } catch (Exception e) {
-                        echo "❌ Failed to download artifact: ${e.message}"
-                        echo "Make sure:"
-                        echo "1. Copy Artifact Plugin is installed"
-                        echo "2. CI job name is correct: ${ciJobName}"
-                        echo "3. CI job has successfully created artifacts"
-                        error("Artifact download failed: ${e.message}")
+                        error("Failed to download artifact: ${e.message}")
                     }
                 }
             }
         }
         
-        stage('Deploy to EC2') {
+        stage('Setup Ansible Environment') {
             steps {
                 script {
-                    withCredentials([
-                        sshUserPrivateKey(
-                            credentialsId: 'ec2-ssh-key',
-                            keyFileVariable: 'SSH_KEY',
-                            usernameVariable: 'SSH_USER'
-                        ),
-                        string(credentialsId: "ec2-${params.ENVIRONMENT}-host", variable: 'EC2_HOST'),
-                        string(credentialsId: "ec2-${params.ENVIRONMENT}-database-url", variable: 'DATABASE_URL')
-                    ]) {
+                    sh '''
+                        # Check if Ansible is installed
+                        if ! command -v ansible &> /dev/null; then
+                            echo "Installing Ansible..."
+                            pip3 install ansible || brew install ansible
+                        fi
+                        
+                        # Verify Ansible installation
+                        ansible --version
+                        
+                        # Check if ansible directory exists
+                        if [ ! -d "ansible" ]; then
+                            echo "❌ Ansible directory not found!"
+                            echo "Please ensure ansible/ directory exists in your repository"
+                            exit 1
+                        fi
+                        
+                        # Verify required files
+                        REQUIRED_FILES=(
+                            "ansible/inventories/${ENVIRONMENT}/hosts"
+                            "ansible/playbooks/deploy.yml"
+                            "ansible/playbooks/setup-server.yml"
+                            "ansible/playbooks/create-user.yml"
+                        )
+                        
+                        for file in "${REQUIRED_FILES[@]}"; do
+                            if [ ! -f "$file" ]; then
+                                echo "❌ Required file missing: $file"
+                                exit 1
+                            fi
+                        done
+                        
+                        echo "✅ Ansible environment verified"
+                    '''
+                }
+            }
+        }
+        
+        stage('Prepare Deployment') {
+            steps {
+                script {
+                    sh '''
+                        # Get artifact info
+                        ARTIFACT_FILE=$(ls hello-world-app-*.tar.gz | head -1)
+                        BUILD_NUM=$(echo $ARTIFACT_FILE | sed 's/hello-world-app-//; s/.tar.gz//')
+                        
+                        echo "Artifact: $ARTIFACT_FILE"
+                        echo "Build number: $BUILD_NUM"
+                        
+                        # Copy artifact to /tmp for Ansible
+                        cp $ARTIFACT_FILE /tmp/hello-world-app-${BUILD_NUM}.tar.gz
+                        
+                        # Create ansible variables file
+                        cat > ansible/extra_vars.yml << EOF
+build_number: ${BUILD_NUM}
+app_archive_path: /tmp/hello-world-app-${BUILD_NUM}.tar.gz
+environment: ${ENVIRONMENT}
+deployed_by: ${DEPLOYMENT_APPROVER}
+deployed_at: $(date)
+EOF
+                        
+                        echo "=== Deployment Variables ==="
+                        cat ansible/extra_vars.yml
+                    '''
+                }
+            }
+        }
+        
+        stage('Test Ansible Connectivity') {
+            steps {
+                script {
+                    dir('ansible') {
                         sh '''
-                            # Get artifact info
-                            ARTIFACT_FILE=$(ls hello-world-app-*.tar.gz | head -1)
-                            echo "Deploying: $ARTIFACT_FILE"
+                            echo "Testing Ansible connectivity..."
+                            ansible -i inventories/${ENVIRONMENT}/hosts webservers -m ping
                             
-                            # Create release directory name
-                            RELEASE_DIR="${DEPLOY_PATH}/${ENVIRONMENT}/releases/$(date +%Y%m%d%H%M%S)"
-                            CURRENT_DIR="${DEPLOY_PATH}/${ENVIRONMENT}/current"
-                            
-                            echo "Release directory: $RELEASE_DIR"
-                            echo "Current directory: $CURRENT_DIR"
-                            
-                            # Create directories on EC2
-                            ssh -i $SSH_KEY -o StrictHostKeyChecking=no $SSH_USER@$EC2_HOST "
-                                sudo mkdir -p $RELEASE_DIR
-                                sudo mkdir -p ${DEPLOY_PATH}/${ENVIRONMENT}/shared/{log,tmp,config}
-                                sudo chown -R ubuntu:ubuntu ${DEPLOY_PATH}
-                            "
-                            
-                            # Upload and extract application
-                            scp -i $SSH_KEY -o StrictHostKeyChecking=no $ARTIFACT_FILE $SSH_USER@$EC2_HOST:/tmp/
-                            
-                            ssh -i $SSH_KEY -o StrictHostKeyChecking=no $SSH_USER@$EC2_HOST "
-                                # Change to release directory and set ownership
-                                sudo chown -R deploy:deploy $RELEASE_DIR
-                                cd $RELEASE_DIR
-                                
-                                # Extract application files
-                                tar -xzf /tmp/$ARTIFACT_FILE --strip-components=1
-                                
-                                # Set proper ownership after extraction
-                                sudo chown -R deploy:deploy $RELEASE_DIR
-                                
-                                # Check if rbenv is installed, if not install it
-                                if [ ! -d ~/.rbenv ]; then
-                                    echo 'Installing rbenv...'
-                                    git clone https://github.com/rbenv/rbenv.git ~/.rbenv
-                                    git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build
-                                    echo 'export PATH=~/.rbenv/bin:$PATH' >> ~/.bashrc
-                                    echo 'eval $(rbenv init -)' >> ~/.bashrc
-                                fi
-                                
-                                # Setup Ruby environment
-                                export PATH=~/.rbenv/bin:$PATH
-                                eval $(rbenv init - 2>/dev/null) || true
-                                
-                                # Install Ruby if not present
-                                if ! rbenv versions | grep -q 3.1.3; then
-                                    echo 'Installing Ruby 3.1.3...'
-                                    rbenv install 3.1.3
-                                    rbenv global 3.1.3
-                                    gem install bundler
-                                fi
-                                
-                                rbenv global 3.1.3 2>/dev/null || true
-                                
-                                # Generate Rails secret key
-                                if command -v bundle >/dev/null 2>&1; then
-                                    GENERATED_SECRET=\$(bundle exec rails secret 2>/dev/null || ruby -e \"require 'securerandom'; puts SecureRandom.hex(64)\")
-                                else
-                                    GENERATED_SECRET=\$(ruby -e \"require 'securerandom'; puts SecureRandom.hex(64)\" 2>/dev/null || echo 'fallback_secret_key_$(date +%s)')
-                                fi
-                                
-                                # Create environment file
-                                cat > .env.${ENVIRONMENT} << 'EOL'
-RAILS_ENV=${ENVIRONMENT}
-DATABASE_URL=${DATABASE_URL}
-SECRET_KEY_BASE=\$GENERATED_SECRET
-RAILS_LOG_TO_STDOUT=true
-RAILS_SERVE_STATIC_FILES=true
-EOL
-                                
-                                echo 'Generated Rails secret key for ${ENVIRONMENT}'
-                                
-                                # Install system dependencies if needed
-                                if ! dpkg -l | grep -q build-essential; then
-                                    sudo apt update
-                                    sudo apt install -y build-essential libssl-dev libreadline-dev zlib1g-dev
-                                fi
-                                
-                                # Try to install gems
-                                if command -v bundle >/dev/null 2>&1; then
-                                    echo 'Installing gems...'
-                                    bundle install --deployment --without development test 2>/dev/null || bundle install --without development test
-                                else
-                                    echo 'Bundler not available, trying with gem install'
-                                    gem install rails
-                                fi
-                                
-                                # Create symlinks
-                                ln -sfn ${DEPLOY_PATH}/${ENVIRONMENT}/shared/log log 2>/dev/null || true
-                                ln -sfn ${DEPLOY_PATH}/${ENVIRONMENT}/shared/tmp tmp 2>/dev/null || true
-                                
-                                # Try database operations
-                                if [ -f .env.${ENVIRONMENT} ]; then
-                                    source .env.${ENVIRONMENT}
-                                    if command -v bundle >/dev/null 2>&1; then
-                                        echo 'Running database migrations...'
-                                        bundle exec rake db:create 2>/dev/null || echo 'Database creation skipped'
-                                        bundle exec rake db:migrate 2>/dev/null || echo 'Database migration skipped'
-                                    fi
-                                fi
-                                
-                                # Try asset precompilation
-                                if command -v bundle >/dev/null 2>&1; then
-                                    echo 'Precompiling assets...'
-                                    bundle exec rake assets:precompile 2>/dev/null || echo 'Asset precompilation skipped'
-                                fi
-                                
-                                # Update current symlink
-                                sudo ln -sfn $RELEASE_DIR $CURRENT_DIR
-                                
-                                # Try to start Rails server
-                                pkill -f 'rails server' 2>/dev/null || true
-                                cd $CURRENT_DIR
-                                
-                                if command -v bundle >/dev/null 2>&1 && [ -f Gemfile ]; then
-                                    echo 'Starting Rails server...'
-                                    nohup bundle exec rails server -e ${ENVIRONMENT} -p 3000 > log/rails.log 2>&1 &
-                                    echo 'Rails server started on port 3000'
-                                else
-                                    echo 'Starting simple Ruby server...'
-                                    nohup ruby -run -e httpd . -p 3000 > /tmp/server.log 2>&1 &
-                                    echo 'Simple server started on port 3000'
-                                fi
-                                
-                                # Cleanup old releases (keep last 5)
-                                cd ${DEPLOY_PATH}/${ENVIRONMENT}/releases 2>/dev/null || true
-                                ls -t 2>/dev/null | tail -n +6 | xargs -r sudo rm -rf
-                                
-                                echo 'Deployment completed successfully!'
-                            "
-                            
-                            # Clean up local artifact
-                            rm -f /tmp/$ARTIFACT_FILE
+                            if [ $? -eq 0 ]; then
+                                echo "✅ Ansible connectivity test passed"
+                            else
+                                echo "❌ Ansible connectivity test failed"
+                                exit 1
+                            fi
                         '''
                     }
                 }
             }
         }
         
-        stage('Health Check') {
+        stage('Server Setup') {
+            when {
+                expression { !params.SKIP_SERVER_SETUP }
+            }
+            steps {
+                script {
+                    dir('ansible') {
+                        sh '''
+                            echo "Running initial server setup..."
+                            ansible-playbook -i inventories/${ENVIRONMENT}/hosts playbooks/setup-server.yml -v
+                            
+                            if [ $? -eq 0 ]; then
+                                echo "✅ Server setup completed successfully"
+                            else
+                                echo "❌ Server setup failed"
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy with Ansible') {
+            steps {
+                script {
+                    dir('ansible') {
+                        sh '''
+                            echo "Starting Ansible deployment..."
+                            echo "Environment: ${ENVIRONMENT}"
+                            echo "Deploying artifact: $(cat extra_vars.yml | grep app_archive_path)"
+                            
+                            # Run deployment playbook
+                            ansible-playbook -i inventories/${ENVIRONMENT}/hosts playbooks/deploy.yml \
+                                --extra-vars @extra_vars.yml \
+                                -v
+                            
+                            if [ $? -eq 0 ]; then
+                                echo "✅ Ansible deployment completed successfully"
+                            else
+                                echo "❌ Ansible deployment failed"
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Post-Deployment Verification') {
             steps {
                 script {
                     withCredentials([
                         string(credentialsId: "ec2-${params.ENVIRONMENT}-host", variable: 'EC2_HOST')
                     ]) {
                         sh '''
-                            echo "Waiting for application to start..."
-                            sleep 20
+                            echo "Performing post-deployment verification..."
                             
-                            # Check if application is responding
-                            MAX_RETRIES=10
+                            # Wait for application to start
+                            sleep 15
+                            
+                            # Health check
+                            MAX_RETRIES=12
                             RETRY_COUNT=0
                             
                             while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
@@ -287,6 +275,48 @@ EOL
             }
         }
         
+        stage('Create User') {
+            when {
+                expression { params.POST_DEPLOY_ACTION == 'create_user' }
+            }
+            steps {
+                script {
+                    def userChoice = input(
+                        message: 'Create new user on server?',
+                        parameters: [
+                            string(name: 'USERNAME', description: 'Enter username', defaultValue: ''),
+                            choice(name: 'ACCESS_LEVEL', choices: ['1', '2', '3'], description: '1=Admin (full access), 2=Operations (no delete), 3=Read-only'),
+                            booleanParam(name: 'COPY_SSH_KEY', defaultValue: false, description: 'Copy SSH key from deploy user?')
+                        ]
+                    )
+                    
+                    if (userChoice.USERNAME) {
+                        dir('ansible') {
+                            sh """
+                                echo "Creating user: ${userChoice.USERNAME}"
+                                echo "Access level: ${userChoice.ACCESS_LEVEL}"
+                                echo "Copy SSH: ${userChoice.COPY_SSH_KEY}"
+                                
+                                # Create user variables file
+                                cat > user_vars.yml << EOF
+new_username: ${userChoice.USERNAME}
+user_access_level: ${userChoice.ACCESS_LEVEL}
+copy_ssh_key: ${userChoice.COPY_SSH_KEY}
+EOF
+                                
+                                # Run user creation playbook
+                                ansible-playbook -i inventories/${ENVIRONMENT}/hosts playbooks/create-user.yml \
+                                    --extra-vars @user_vars.yml \
+                                    -v
+                            """
+                        }
+                    } else {
+                        echo "No username provided, skipping user creation"
+                    }
+                }
+            }
+        }
+        
         stage('Deployment Summary') {
             steps {
                 script {
@@ -295,15 +325,23 @@ EOL
                     ]) {
                         sh '''
                             echo "
-🎉 Deployment Summary:
+🎉 Ansible Deployment Summary
 ================================
 Environment: ${ENVIRONMENT}
 Server: ${EC2_HOST}
 Approved by: ${DEPLOYMENT_APPROVER}
 Build: ${BUILD_NUMBER_TO_DEPLOY:-latest}
+Method: Ansible automation
 Application URL: http://${EC2_HOST}:3000
 Deployment time: $(date)
 ================================
+
+📋 Available Access Levels:
+1. Admin: Full system access
+2. Operations: Can read/write but not delete
+3. Read-only: View files only
+
+🔗 SSH Access: ssh <username>@${EC2_HOST}
                             "
                         '''
                     }
@@ -314,9 +352,8 @@ Deployment time: $(date)
     
     post {
         success {
-            echo "✅ Deployment to ${params.ENVIRONMENT} completed successfully!"
+            echo "✅ Ansible deployment to ${params.ENVIRONMENT} completed successfully!"
             
-            // Optional: Send success notification
             script {
                 try {
                     withCredentials([
@@ -324,7 +361,7 @@ Deployment time: $(date)
                     ]) {
                         sh '''
                             curl -X POST -H 'Content-type: application/json' \
-                                --data '{"text":"✅ Deployment Success: '${APP_NAME}' to '${ENVIRONMENT}' - Build #'${BUILD_NUMBER}' (by '${DEPLOYMENT_APPROVER}')"}' \
+                                --data '{"text":"✅ Ansible Deployment Success: '${APP_NAME}' to '${ENVIRONMENT}' - Build #'${BUILD_NUMBER}' (by '${DEPLOYMENT_APPROVER}')"}' \
                                 $SLACK_WEBHOOK
                         '''
                     }
@@ -335,48 +372,33 @@ Deployment time: $(date)
         }
         
         failure {
-            echo "❌ Deployment to ${params.ENVIRONMENT} failed!"
+            echo "❌ Ansible deployment to ${params.ENVIRONMENT} failed!"
             
-            // Optional: Rollback logic
             script {
                 try {
                     withCredentials([
-                        sshUserPrivateKey(
-                            credentialsId: 'ec2-ssh-key',
-                            keyFileVariable: 'SSH_KEY',
-                            usernameVariable: 'SSH_USER'
-                        ),
-                        string(credentialsId: "ec2-${params.ENVIRONMENT}-host", variable: 'EC2_HOST')
+                        string(credentialsId: 'slack-webhook-url', variable: 'SLACK_WEBHOOK')
                     ]) {
                         sh '''
-                            echo "Attempting rollback to previous release..."
-                            ssh -i $SSH_KEY -o StrictHostKeyChecking=no $SSH_USER@$EC2_HOST "
-                                cd ${DEPLOY_PATH}/${ENVIRONMENT}/releases
-                                PREVIOUS_RELEASE=\\$(ls -t | sed -n 2p)
-                                if [ -n \\"\\$PREVIOUS_RELEASE\\" ]; then
-                                    ln -sfn ${DEPLOY_PATH}/${ENVIRONMENT}/releases/\\$PREVIOUS_RELEASE ${DEPLOY_PATH}/${ENVIRONMENT}/current
-                                    echo \\"Rolled back to: \\$PREVIOUS_RELEASE\\"
-                                    
-                                    # Restart application
-                                    cd ${DEPLOY_PATH}/${ENVIRONMENT}/current
-                                    export PATH=\\"\\$HOME/.rbenv/bin:\\$PATH\\"
-                                    eval \\"\\$(rbenv init -)\\"
-                                    source .env.${ENVIRONMENT}
-                                    pkill -f 'rails server' || true
-                                    nohup bundle exec rails server -e ${ENVIRONMENT} -p 3000 > log/rails.log 2>&1 &
-                                else
-                                    echo \\"No previous release found for rollback\\"
-                                fi
-                            "
+                            curl -X POST -H 'Content-type: application/json' \
+                                --data '{"text":"❌ Ansible Deployment Failed: '${APP_NAME}' to '${ENVIRONMENT}' - Build #'${BUILD_NUMBER}' (by '${DEPLOYMENT_APPROVER}')"}' \
+                                $SLACK_WEBHOOK
                         '''
                     }
                 } catch (Exception e) {
-                    echo "Rollback failed: ${e.message}"
+                    echo "Failed notification: ${e.message}"
                 }
             }
         }
         
         always {
+            script {
+                sh '''
+                    rm -f hello-world-app-*.tar.gz
+                    rm -f ansible/extra_vars.yml
+                    rm -f ansible/user_vars.yml
+                '''
+            }
             cleanWs()
         }
     }
