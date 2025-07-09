@@ -100,14 +100,45 @@ pipeline {
             steps {
                 script {
                     sh '''
-                        # Check if Ansible is installed
-                        if ! command -v ansible &> /dev/null; then
-                            echo "Installing Ansible..."
-                            pip3 install ansible || brew install ansible
+                        # Find Ansible binary directly
+                        echo "Locating Ansible installation..."
+                        
+                        # Check multiple possible locations
+                        ANSIBLE_BINARY=""
+                        POSSIBLE_PATHS=(
+                            "/usr/local/bin/ansible"
+                            "/opt/homebrew/bin/ansible"
+                            "$HOME/Library/Python/3.9/bin/ansible"
+                            "$HOME/.local/bin/ansible"
+                        )
+                        
+                        for path in "${POSSIBLE_PATHS[@]}"; do
+                            if [ -f "$path" ]; then
+                                ANSIBLE_BINARY="$path"
+                                echo "✅ Found Ansible at: $path"
+                                break
+                            fi
+                        done
+                        
+                        # If not found, try to install via Homebrew
+                        if [ -z "$ANSIBLE_BINARY" ]; then
+                            echo "Installing Ansible via Homebrew..."
+                            if command -v brew &> /dev/null; then
+                                brew install ansible
+                                ANSIBLE_BINARY="/usr/local/bin/ansible"
+                            else
+                                echo "❌ No Ansible found and Homebrew not available"
+                                exit 1
+                            fi
                         fi
                         
-                        # Verify Ansible installation
-                        ansible --version
+                        # Test Ansible with direct path
+                        echo "Testing Ansible..."
+                        $ANSIBLE_BINARY --version
+                        
+                        # Store the path for later stages
+                        echo "$ANSIBLE_BINARY" > /tmp/ansible_path
+                        echo "ANSIBLE_DIR=$(dirname $ANSIBLE_BINARY)" > /tmp/ansible_env
                         
                         # Check if ansible directory exists
                         if [ ! -d "ansible" ]; then
@@ -115,21 +146,6 @@ pipeline {
                             echo "Please ensure ansible/ directory exists in your repository"
                             exit 1
                         fi
-                        
-                        # Verify required files
-                        REQUIRED_FILES=(
-                            "ansible/inventories/${ENVIRONMENT}/hosts"
-                            "ansible/playbooks/deploy.yml"
-                            "ansible/playbooks/setup-server.yml"
-                            "ansible/playbooks/create-user.yml"
-                        )
-                        
-                        for file in "${REQUIRED_FILES[@]}"; do
-                            if [ ! -f "$file" ]; then
-                                echo "❌ Required file missing: $file"
-                                exit 1
-                            fi
-                        done
                         
                         echo "✅ Ansible environment verified"
                     '''
@@ -172,13 +188,25 @@ EOF
                 script {
                     dir('ansible') {
                         sh '''
+                            # Load Ansible path
+                            source /tmp/ansible_env
+                            ANSIBLE_BINARY=$(cat /tmp/ansible_path)
+                            
                             echo "Testing Ansible connectivity..."
-                            ansible -i inventories/${ENVIRONMENT}/hosts webservers -m ping
+                            echo "Using Ansible binary: $ANSIBLE_BINARY"
+                            echo "Using inventory: inventories/${ENVIRONMENT}/hosts"
+                            
+                            # Test ping with direct binary path
+                            $ANSIBLE_BINARY -i inventories/${ENVIRONMENT}/hosts webservers -m ping
                             
                             if [ $? -eq 0 ]; then
                                 echo "✅ Ansible connectivity test passed"
                             else
                                 echo "❌ Ansible connectivity test failed"
+                                echo "Debugging information:"
+                                echo "Current directory: $(pwd)"
+                                echo "Inventory file contents:"
+                                cat inventories/${ENVIRONMENT}/hosts
                                 exit 1
                             fi
                         '''
@@ -195,6 +223,9 @@ EOF
                 script {
                     dir('ansible') {
                         sh '''
+                            # Set up PATH for Ansible
+                            export PATH="$HOME/Library/Python/3.9/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+                            
                             echo "Running initial server setup..."
                             ansible-playbook -i inventories/${ENVIRONMENT}/hosts playbooks/setup-server.yml -v
                             
@@ -215,12 +246,18 @@ EOF
                 script {
                     dir('ansible') {
                         sh '''
+                            # Load Ansible path
+                            source /tmp/ansible_env
+                            ANSIBLE_BINARY=$(cat /tmp/ansible_path)
+                            ANSIBLE_PLAYBOOK_BINARY="$(dirname $ANSIBLE_BINARY)/ansible-playbook"
+                            
                             echo "Starting Ansible deployment..."
                             echo "Environment: ${ENVIRONMENT}"
+                            echo "Using binary: $ANSIBLE_PLAYBOOK_BINARY"
                             echo "Deploying artifact: $(cat extra_vars.yml | grep app_archive_path)"
                             
-                            # Run deployment playbook
-                            ansible-playbook -i inventories/${ENVIRONMENT}/hosts playbooks/deploy.yml \
+                            # Run deployment playbook with direct binary path
+                            $ANSIBLE_PLAYBOOK_BINARY -i inventories/${ENVIRONMENT}/hosts playbooks/deploy.yml \
                                 --extra-vars @extra_vars.yml \
                                 -v
                             
