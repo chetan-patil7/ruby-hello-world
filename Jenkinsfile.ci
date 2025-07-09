@@ -115,34 +115,6 @@ pipeline {
             }
         }
         
-        // stage('Code Quality Checks') {
-        //     steps {
-        //         script {
-        //             sh '''
-        //                 export PATH="$HOME/.rbenv/bin:$PATH"
-        //                 eval "$(rbenv init -)"
-                        
-        //                 # Run Rubocop if present
-        //                 if bundle show rubocop &> /dev/null; then
-        //                     echo "Running Rubocop..."
-                            
-        //                     # Try to auto-fix issues
-        //                     bundle exec rubocop -A
-                            
-        //                     # Run again to check if issues are fixed
-        //                     bundle exec rubocop --format progress
-        //                 fi
-                        
-        //                 # Run Brakeman security scan if present
-        //                 if bundle show brakeman &> /dev/null; then
-        //                     echo "Running Brakeman security scan..."
-        //                     bundle exec brakeman -z
-        //                 fi
-        //             '''
-        //         }
-        //     }
-        // }
-        
         stage('Asset Precompilation') {
             steps {
                 script {
@@ -171,6 +143,9 @@ pipeline {
                             --exclude='.jenkins' \
                             --exclude='*.log' \
                             .
+                        
+                        echo "Created artifact: hello-world-app-${BUILD_NUMBER}.tar.gz"
+                        ls -la hello-world-app-*.tar.gz
                     '''
                 }
                 
@@ -178,6 +153,8 @@ pipeline {
                 archiveArtifacts artifacts: 'hello-world-app-*.tar.gz', 
                                 fingerprint: true,
                                 allowEmptyArchive: false
+                
+                echo "✅ Artifact archived successfully"
             }
         }
     }
@@ -203,18 +180,21 @@ pipeline {
         
         success {
             echo 'CI Pipeline completed successfully!'
+            echo "Build number: ${env.BUILD_NUMBER}"
+            echo "Artifact: hello-world-app-${env.BUILD_NUMBER}.tar.gz"
             
             // Trigger CD pipeline with manual approval
             script {
                 try {
-                    build job: 'hello-world-app-cd', 
+                    build job: 'ruby-rails-cd',  // Updated to match your CD job name
                           parameters: [
                               string(name: 'BUILD_NUMBER_TO_DEPLOY', value: env.BUILD_NUMBER),
                               choice(name: 'ENVIRONMENT', value: 'staging')
                           ],
                           wait: false
+                    echo "✅ CD pipeline triggered successfully"
                 } catch (Exception e) {
-                    echo "CD pipeline trigger failed: ${e.message}"
+                    echo "❌ CD pipeline trigger failed: ${e.message}"
                     echo "You can manually trigger the CD pipeline with build number: ${env.BUILD_NUMBER}"
                 }
             }
