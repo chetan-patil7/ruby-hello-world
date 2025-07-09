@@ -166,7 +166,7 @@ EOF
 
                             cat > ansible/playbooks/deploy.yml << 'EOF'
 ---
-- name: Simple Deploy
+- name: Deploy Application
   hosts: webservers
   become: yes
   vars:
@@ -189,12 +189,56 @@ EOF
         group: "{{ deploy_user }}"
         remote_src: yes
 
-    - name: Start simple server
+    - name: Stop existing servers
+      shell: |
+        pkill -f 'python.*http.server' || true
+        pkill -f 'rails server' || true
+        sleep 2
+      become_user: "{{ deploy_user }}"
+      ignore_errors: yes
+
+    - name: Start server (async)
       shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
-        pkill -f 'python.*http.server' || true
-        nohup python3 -m http.server 3000 > /tmp/server.log 2>&1 &
+        nohup bash -c 'python3 -m http.server 3000' > /tmp/server.log 2>&1 &
+        echo $! > /tmp/server.pid
+        sleep 3
+        echo "Server started with PID: $(cat /tmp/server.pid 2>/dev/null || echo 'unknown')"
       become_user: "{{ deploy_user }}"
+      async: 30
+      poll: 0
+      register: server_start
+
+    - name: Wait for server startup
+      async_status:
+        jid: "{{ server_start.ansible_job_id }}"
+      register: job_result
+      until: job_result.finished
+      retries: 6
+      delay: 5
+      when: server_start.ansible_job_id is defined
+
+    - name: Verify server is running
+      shell: |
+        sleep 5
+        if ps aux | grep -v grep | grep 'python.*http.server' > /dev/null; then
+          echo "✅ Server is running"
+          netstat -tlnp 2>/dev/null | grep :3000 || echo "Checking port 3000..."
+        else
+          echo "❌ Server not found in process list"
+          echo "Log file contents:"
+          cat /tmp/server.log 2>/dev/null || echo "No log file found"
+        fi
+      become_user: "{{ deploy_user }}"
+      ignore_errors: yes
+
+    - name: Display deployment success
+      debug:
+        msg: |
+          🎉 Deployment completed!
+          Server: {{ ansible_host }}:3000
+          Application: {{ deploy_path }}/{{ rails_env }}/current
+          Check status: ssh {{ deploy_user }}@{{ ansible_host }} "ps aux | grep python"
 EOF
                             echo "✅ Created minimal ansible structure"
                         fi
