@@ -1,0 +1,55 @@
+---
+- name: Create User with Tiered Access
+  hosts: webservers
+  become: yes
+  
+  vars_prompt:
+    - name: new_username
+      prompt: "Enter username to create"
+      private: no
+      
+    - name: user_access_level
+      prompt: |
+        Select access level:
+        1. admin (Full access - can run anything)
+        2. operations (Can read/write but not delete files)
+        3. readonly (Can only view files)
+        Enter choice (1/2/3)
+      private: no
+      
+    - name: copy_ssh_key
+      prompt: "Copy SSH key from deploy user? (yes/no)"
+      private: no
+      default: "no"
+
+  pre_tasks:
+    - name: Validate access level choice
+      set_fact:
+        user_access_group: "{{ 
+          'admin_group' if user_access_level == '1' or user_access_level == 'admin' else
+          'ops_group' if user_access_level == '2' or user_access_level == 'operations' else
+          'readonly_group' if user_access_level == '3' or user_access_level == 'readonly' else
+          'invalid'
+        }}"
+        
+    - name: Fail if invalid access level
+      fail:
+        msg: "Invalid access level. Please choose 1, 2, or 3"
+      when: user_access_group == 'invalid'
+      
+    - name: Convert ssh key choice to boolean
+      set_fact:
+        copy_ssh_key: "{{ copy_ssh_key | lower == 'yes' or copy_ssh_key | lower == 'y' }}"
+
+  roles:
+    - user-management
+
+  post_tasks:
+    - name: Display user creation summary
+      debug:
+        msg: |
+          🎉 User created successfully!
+          👤 Username: {{ new_username }}
+          🔐 Access Level: {{ user_access_group }}
+          🔑 SSH Access: {{ 'Enabled' if copy_ssh_key else 'Disabled' }}
+          🔗 Login: ssh {{ new_username }}@{{ ansible_host }}

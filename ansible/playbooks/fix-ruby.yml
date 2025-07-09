@@ -1,0 +1,49 @@
+---
+- name: Fix Ruby and Bundler Installation
+  hosts: webservers
+  become: yes
+  
+  tasks:
+    - name: Fix rbenv paths and install bundler
+      shell: |
+        export PATH="/home/{{ deploy_user }}/.rbenv/bin:$PATH"
+        eval "$(rbenv init -)"
+        
+        # Ensure Ruby is properly installed
+        if rbenv versions | grep -q {{ ruby_version }}; then
+          rbenv global {{ ruby_version }}
+          rbenv rehash
+          
+          # Install bundler using full path
+          /home/{{ deploy_user }}/.rbenv/versions/{{ ruby_version }}/bin/gem install bundler -v {{ bundler_version }}
+          rbenv rehash
+          
+          echo "✅ Ruby and Bundler fixed successfully"
+        else
+          echo "❌ Ruby {{ ruby_version }} not found"
+          exit 1
+        fi
+      become_user: "{{ deploy_user }}"
+      
+    - name: Test bundle command
+      shell: |
+        export PATH="/home/{{ deploy_user }}/.rbenv/bin:$PATH"
+        eval "$(rbenv init -)"
+        rbenv rehash
+        bundle --version
+      become_user: "{{ deploy_user }}"
+      register: bundle_test
+      
+    - name: Display bundle version
+      debug:
+        msg: "Bundle version: {{ bundle_test.stdout }}"
+        
+    - name: Update bashrc with correct paths
+      lineinfile:
+        path: "/home/{{ deploy_user }}/.bashrc"
+        line: "{{ item }}"
+        state: present
+      loop:
+        - 'export PATH="$HOME/.rbenv/bin:$PATH"'
+        - 'eval "$(rbenv init -)"'
+        - 'export PATH="$HOME/.rbenv/shims:$PATH"'

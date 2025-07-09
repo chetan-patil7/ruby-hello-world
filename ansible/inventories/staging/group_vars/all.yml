@@ -1,0 +1,32 @@
+---
+# Environment
+rails_env: staging
+app_name: hello-world-app
+deploy_user: deploy
+deploy_path: /var/www/hello-world-app
+
+# Ruby configuration
+ruby_version: "3.1.3"
+bundler_version: "2.3.0"
+
+# Database configuration
+database_name: hello_world_staging
+database_user: rails_user
+database_password: "secure_password_123"
+
+# Server configuration
+server_name: staging.yourdomain.com
+nginx_port: 80
+rails_port: 3000
+
+# User Management Groups
+user_groups:
+  admin_group:
+    name: admin_group
+    description: "Full administrative access"
+  ops_group:
+    name: ops_group
+    description: "Operations access - no delete permissions"
+  readonly_group:
+    name: readonly_group
+    description: "Read-only access"
