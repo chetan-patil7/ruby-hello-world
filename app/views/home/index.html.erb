@@ -1,0 +1,23 @@
+<div style="max-width: 800px; margin: 0 auto; text-align: center;">
+  <h1>🎉 Welcome to My Portfolio!</h1>
+  <h2>Hi there! I'm Chetan</h2>
+  
+  <div style="background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 30px 0;">
+    <h3>🚀 About This Project</h3>
+    <p>This is a Rails application that I deployed using:</p>
+    <ul style="text-align: left; display: inline-block;">
+      <li>✅ Ruby on Rails <%= Rails.version %></li>
+      <li>✅ Jenkins CI/CD Pipeline</li>
+      <li>✅ Ansible Automation</li>
+      <li>✅ AWS EC2 Deployment</li>
+      <li>✅ PostgreSQL Database</li>
+    </ul>
+  </div>
+  
+  <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
+    <h3>📊 System Info</h3>
+    <p><strong>Environment:</strong> <%= Rails.env %></p>
+    <p><strong>Deployed:</strong> <%= Time.current.strftime("%B %d, %Y at %I:%M %p") %></p>
+    <p><strong>Server:</strong> <%= Socket.gethostname %></p>
+  </div>
+</div>
