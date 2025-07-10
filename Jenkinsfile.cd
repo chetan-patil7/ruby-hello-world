@@ -12,16 +12,16 @@ pipeline {
             defaultValue: '',
             description: 'Build number from CI pipeline to deploy (leave empty for latest)'
         )
-        booleanParam(
-            name: 'FORCE_TOOL_INSTALLATION',
-            defaultValue: false,
-            description: 'Force reinstallation of all tools (even if already installed)'
-        )
-        booleanParam(
-            name: 'SKIP_TOOL_CHECK',
-            defaultValue: false,
-            description: 'Skip tool verification and installation (use only if tools are confirmed to be installed)'
-        )
+        // booleanParam(
+        //     name: 'SKIP_SERVER_SETUP',
+        //     defaultValue: true,
+        //     description: 'Skip server setup (uncheck for first deployment)'
+        // )
+        // choice(
+        //     name: 'POST_DEPLOY_ACTION',
+        //     choices: ['none', 'create_user'],
+        //     description: 'Action to perform after deployment'
+        // )
     }
     
     environment {
@@ -31,430 +31,12 @@ pipeline {
     }
     
     stages {
-        stage('Initial Server Tool Verification') {
-            when {
-                expression { !params.SKIP_TOOL_CHECK }
-            }
-            steps {
-                script {
-                    sh '''
-                        echo "🔍 INITIAL SERVER TOOL VERIFICATION"
-                        echo "====================================="
-                        echo "Environment: ${ENVIRONMENT}"
-                        echo "Force installation: ${FORCE_TOOL_INSTALLATION}"
-                        echo ""
-                        
-                        # Create temporary Ansible structure for tool checking
-                        mkdir -p temp_ansible/{inventories,playbooks}
-                        mkdir -p temp_ansible/inventories/staging
-                        mkdir -p temp_ansible/inventories/production
-                        
-                        # Create inventory files
-                        cat > temp_ansible/inventories/staging/hosts << 'EOF'
-[webservers]
-staging-server ansible_host=54.210.171.180 ansible_user=deploy
-
-[all:vars]
-ansible_ssh_private_key_file=~/.ssh/deploy_key
-deploy_user=deploy
-EOF
-
-                        cat > temp_ansible/inventories/production/hosts << 'EOF'
-[webservers]
-production-server ansible_host=YOUR_PROD_IP ansible_user=deploy
-
-[all:vars]
-ansible_ssh_private_key_file=~/.ssh/deploy_key
-deploy_user=deploy
-EOF
-
-                        # Create comprehensive tool verification playbook with FIXED syntax
-                        cat > temp_ansible/playbooks/verify_and_install_tools.yml << 'PLAYBOOK_EOF'
----
-- name: Comprehensive Server Tool Verification and Installation
-  hosts: webservers
-  become: yes
-  vars:
-    force_installation: "{{ force_tool_installation | default(false) }}"
-    required_tools:
-      ruby_version: "3.1.3"
-      bundler_version: "2.3.0"
-      node_version: "18.x"
-      postgres_version: "14"
-    
-    system_packages:
-      - curl
-      - wget
-      - git
-      - build-essential
-      - libssl-dev
-      - libreadline-dev
-      - zlib1g-dev
-      - libyaml-dev
-      - libxml2-dev
-      - libxslt1-dev
-      - libcurl4-openssl-dev
-      - libffi-dev
-      - postgresql
-      - postgresql-contrib
-      - libpq-dev
-      - nodejs
-      - npm
-      - python3
-      - python3-pip
-      - unzip
-      - htop
-      - tree
-      - vim
-      - redis-server
-      - imagemagick
-      - libmagickwand-dev
-  
-  tasks:
-    - name: Create tool check directory with proper permissions
-      file:
-        path: /tmp/tool_check
-        state: directory
-        mode: '0777'
-        owner: "{{ deploy_user }}"
-        group: "{{ deploy_user }}"
-
-    - name: Tool audit script
-      copy:
-        dest: /tmp/tool_audit.sh
-        mode: '0755'
-        owner: "{{ deploy_user }}"
-        group: "{{ deploy_user }}"
-        content: |
-          #!/bin/bash
-          echo "🔍 COMPREHENSIVE SERVER TOOL AUDIT"
-          echo "=================================="
-          echo "Date: $(date)"
-          echo "Server: $(hostname)"
-          echo ""
-          
-          # Initialize tracking variables
-          MISSING_PACKAGES=""
-          MISSING_TOOLS=""
-          INSTALL_REQUIRED=false
-          
-          echo "📦 SYSTEM PACKAGES AUDIT:"
-          echo "========================"
-          for pkg in curl wget git build-essential postgresql nodejs python3 unzip redis-server imagemagick; do
-            if dpkg -l 2>/dev/null | grep -q "^ii.*$pkg "; then
-              echo "  ✅ $pkg - installed"
-            else
-              echo "  ❌ $pkg - MISSING"
-              MISSING_PACKAGES="$MISSING_PACKAGES $pkg"
-              INSTALL_REQUIRED=true
-            fi
-          done
-          
-          echo ""
-          echo "💎 RUBY ENVIRONMENT AUDIT:"
-          echo "========================="
-          
-          # Check rbenv
-          if [ -d "/home/{{ deploy_user }}/.rbenv" ]; then
-            echo "  ✅ rbenv - installed"
-          else
-            echo "  ❌ rbenv - NOT INSTALLED"
-            MISSING_TOOLS="$MISSING_TOOLS rbenv"
-            INSTALL_REQUIRED=true
-          fi
-          
-          # Check Ruby
-          if command -v ruby >/dev/null 2>&1; then
-            RUBY_VERSION=$(ruby --version)
-            echo "  ✅ Ruby - $RUBY_VERSION"
-          else
-            echo "  ❌ Ruby - NOT INSTALLED"
-            MISSING_TOOLS="$MISSING_TOOLS ruby"
-            INSTALL_REQUIRED=true
-          fi
-          
-          # Check Bundler
-          if command -v bundle >/dev/null 2>&1; then
-            BUNDLER_VERSION=$(bundle --version)
-            echo "  ✅ Bundler - $BUNDLER_VERSION"
-          else
-            echo "  ❌ Bundler - NOT INSTALLED"
-            MISSING_TOOLS="$MISSING_TOOLS bundler"
-            INSTALL_REQUIRED=true
-          fi
-          
-          echo ""
-          echo "🟢 NODE.JS ENVIRONMENT AUDIT:"
-          echo "============================"
-          
-          # Check Node.js
-          if command -v node >/dev/null 2>&1; then
-            NODE_VERSION=$(node --version)
-            echo "  ✅ Node.js - $NODE_VERSION"
-          else
-            echo "  ❌ Node.js - NOT INSTALLED"
-            MISSING_TOOLS="$MISSING_TOOLS nodejs"
-            INSTALL_REQUIRED=true
-          fi
-          
-          # Check npm
-          if command -v npm >/dev/null 2>&1; then
-            NPM_VERSION=$(npm --version)
-            echo "  ✅ npm - $NPM_VERSION"
-          else
-            echo "  ❌ npm - NOT INSTALLED"
-            MISSING_TOOLS="$MISSING_TOOLS npm"
-            INSTALL_REQUIRED=true
-          fi
-          
-          echo ""
-          echo "🐘 POSTGRESQL AUDIT:"
-          echo "==================="
-          
-          # Check PostgreSQL client
-          if command -v psql >/dev/null 2>&1; then
-            PSQL_VERSION=$(psql --version)
-            echo "  ✅ PostgreSQL client - $PSQL_VERSION"
-          else
-            echo "  ❌ PostgreSQL client - NOT INSTALLED"
-            MISSING_TOOLS="$MISSING_TOOLS postgresql-client"
-            INSTALL_REQUIRED=true
-          fi
-          
-          # Check PostgreSQL service
-          if systemctl is-active postgresql >/dev/null 2>&1; then
-            echo "  ✅ PostgreSQL service - RUNNING"
-          else
-            echo "  ❌ PostgreSQL service - NOT RUNNING"
-            MISSING_TOOLS="$MISSING_TOOLS postgresql-service"
-            INSTALL_REQUIRED=true
-          fi
-          
-          echo ""
-          echo "📋 AUDIT SUMMARY:"
-          echo "================"
-          
-          if [ "$INSTALL_REQUIRED" = "true" ] || [ "{{ force_installation }}" = "true" ]; then
-            echo "❌ INSTALLATION REQUIRED"
-            echo "INSTALL_REQUIRED" > /tmp/tool_check/status
-          else
-            echo "✅ ALL TOOLS ARE PROPERLY INSTALLED"
-            echo "TOOLS_READY" > /tmp/tool_check/status
-          fi
-          
-          # Store missing items
-          echo "$MISSING_PACKAGES" > /tmp/tool_check/missing_packages
-          echo "$MISSING_TOOLS" > /tmp/tool_check/missing_tools
-
-    - name: Execute tool audit
-      shell: /tmp/tool_audit.sh
-      register: tool_audit
-      become_user: "{{ deploy_user }}"
-
-    - name: Display audit results
-      debug:
-        msg: "{{ tool_audit.stdout_lines }}"
-
-    - name: Read tool status
-      shell: cat /tmp/tool_check/status
-      register: tool_status
-      ignore_errors: yes
-
-    - name: Install system packages
-      apt:
-        name: "{{ system_packages }}"
-        state: present
-        update_cache: yes
-      when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
-
-    - name: Ruby setup script
-      copy:
-        dest: /tmp/ruby_setup.sh
-        mode: '0755'
-        owner: "{{ deploy_user }}"
-        group: "{{ deploy_user }}"
-        content: |
-          #!/bin/bash
-          set -e
-          
-          MISSING_TOOLS=$(cat /tmp/tool_check/missing_tools 2>/dev/null || echo "")
-          FORCE_INSTALL="{{ force_installation }}"
-          
-          if echo "$MISSING_TOOLS" | grep -q "rbenv" || echo "$MISSING_TOOLS" | grep -q "ruby" || echo "$MISSING_TOOLS" | grep -q "bundler" || [ "$FORCE_INSTALL" = "true" ]; then
-            echo "💎 SETTING UP RUBY ENVIRONMENT..."
-            
-            # Install rbenv
-            if [ ! -d "/home/{{ deploy_user }}/.rbenv" ] || [ "$FORCE_INSTALL" = "true" ]; then
-              echo "Installing rbenv..."
-              rm -rf /home/{{ deploy_user }}/.rbenv
-              git clone https://github.com/rbenv/rbenv.git /home/{{ deploy_user }}/.rbenv
-              git clone https://github.com/rbenv/ruby-build.git /home/{{ deploy_user }}/.rbenv/plugins/ruby-build
-              
-              # Add to bashrc
-              if ! grep -q 'rbenv' /home/{{ deploy_user }}/.bashrc; then
-                echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> /home/{{ deploy_user }}/.bashrc
-                echo 'eval "$(rbenv init -)"' >> /home/{{ deploy_user }}/.bashrc
-              fi
-              
-              chown -R {{ deploy_user }}:{{ deploy_user }} /home/{{ deploy_user }}/.rbenv
-            fi
-            
-            # Install Ruby
-            export PATH="/home/{{ deploy_user }}/.rbenv/bin:$PATH"
-            eval "$(rbenv init -)"
-            
-            if ! rbenv versions | grep -q "{{ required_tools.ruby_version }}" || [ "$FORCE_INSTALL" = "true" ]; then
-              echo "Installing Ruby {{ required_tools.ruby_version }}..."
-              rbenv install {{ required_tools.ruby_version }}
-              rbenv global {{ required_tools.ruby_version }}
-              rbenv rehash
-              
-              # Install bundler
-              gem install bundler -v {{ required_tools.bundler_version }}
-              rbenv rehash
-              
-              echo "✅ Ruby and Bundler installed"
-            fi
-          else
-            echo "⏭️ Ruby already properly configured"
-          fi
-
-    - name: Execute Ruby setup
-      shell: /tmp/ruby_setup.sh
-      become_user: "{{ deploy_user }}"
-      when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
-
-    - name: Node.js setup
-      shell: |
-        if ! command -v node >/dev/null 2>&1 || [ "{{ force_installation }}" = "true" ]; then
-          echo "🟢 Installing Node.js..."
-          curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-          apt-get install -y nodejs
-          echo "✅ Node.js installed"
-        else
-          echo "⏭️ Node.js already installed"
-        fi
-      when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
-
-    - name: PostgreSQL setup script
-      copy:
-        dest: /tmp/postgres_setup.sh
-        mode: '0755'
-        owner: "{{ deploy_user }}"
-        group: "{{ deploy_user }}"
-        content: |
-          #!/bin/bash
-          echo "🐘 CONFIGURING POSTGRESQL..."
-          systemctl start postgresql
-          systemctl enable postgresql
-          
-          # Create user
-          sudo -u postgres psql -c "SELECT 1" > /dev/null 2>&1
-          if [ $? -eq 0 ]; then
-            sudo -u postgres createuser --createdb {{ deploy_user }} 2>/dev/null || echo "User exists"
-            sudo -u postgres psql -c "ALTER USER {{ deploy_user }} WITH PASSWORD 'deploy123';" 2>/dev/null || echo "Password set"
-            echo "✅ PostgreSQL configured"
-          fi
-
-    - name: Execute PostgreSQL setup
-      shell: /tmp/postgres_setup.sh
-      when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
-
-    - name: Final verification
-      shell: |
-        echo "🔍 FINAL VERIFICATION"
-        echo "===================="
-        echo "Ruby: $(ruby --version 2>/dev/null || echo 'Not available')"
-        echo "Bundler: $(bundle --version 2>/dev/null || echo 'Not available')"
-        echo "Node.js: $(node --version 2>/dev/null || echo 'Not available')"
-        echo "PostgreSQL: $(psql --version 2>/dev/null || echo 'Not available')"
-        
-        # Check if all critical tools are available
-        if command -v ruby >/dev/null 2>&1 && command -v bundle >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && command -v psql >/dev/null 2>&1; then
-          echo "✅ ALL CRITICAL TOOLS VERIFIED AND READY!"
-          echo "READY" > /tmp/tool_check/final_status
-        else
-          echo "⚠️ Some tools missing but proceeding with deployment"
-          echo "READY" > /tmp/tool_check/final_status
-        fi
-      become_user: "{{ deploy_user }}"
-
-    - name: Display success
-      debug:
-        msg: |
-          🎉 TOOL VERIFICATION COMPLETED! 🎉
-          
-          ✅ Server assessment completed
-          ✅ Missing tools will be installed during deployment
-          ✅ Server ready for Rails deployment
-PLAYBOOK_EOF
-
-                        # Find Ansible and run playbook
-                        ANSIBLE_BINARY=""
-                        POSSIBLE_PATHS=(
-                            "/usr/local/bin/ansible"
-                            "/opt/homebrew/bin/ansible"
-                            "$HOME/Library/Python/3.9/bin/ansible"
-                            "$HOME/.local/bin/ansible"
-                        )
-                        
-                        for path in "${POSSIBLE_PATHS[@]}"; do
-                            if [ -f "$path" ]; then
-                                ANSIBLE_BINARY="$path"
-                                echo "✅ Found Ansible at: $path"
-                                break
-                            fi
-                        done
-                        
-                        if [ -z "$ANSIBLE_BINARY" ]; then
-                            echo "❌ Ansible not found!"
-                            exit 1
-                        fi
-                        
-                        ANSIBLE_PLAYBOOK_BINARY="$(dirname $ANSIBLE_BINARY)/ansible-playbook"
-                        
-                        echo "🚀 Running tool verification..."
-                        
-                        # Run the tool verification playbook
-                        $ANSIBLE_PLAYBOOK_BINARY -i temp_ansible/inventories/${ENVIRONMENT}/hosts \\
-                            temp_ansible/playbooks/verify_and_install_tools.yml \\
-                            --extra-vars "force_tool_installation=${FORCE_TOOL_INSTALLATION}" \\
-                            -v
-                        
-                        if [ $? -eq 0 ]; then
-                            echo "✅ TOOL VERIFICATION COMPLETED!"
-                        else
-                            echo "❌ TOOL VERIFICATION FAILED!"
-                            exit 1
-                        fi
-                        
-                        # Cleanup
-                        rm -rf temp_ansible
-                    '''
-                }
-            }
-        }
-        
         stage('Manual Approval') {
             steps {
                 script {
-                    def deploymentMessage = """
-🚀 READY TO DEPLOY: All tools verified!
-
-Deploy to ${params.ENVIRONMENT} using Ansible?
-"""
+                    def deploymentMessage = "Deploy to ${params.ENVIRONMENT} using Ansible?"
                     if (params.ENVIRONMENT == 'production') {
-                        deploymentMessage = """
-⚠️ PRODUCTION DEPLOYMENT ⚠️
-
-✅ All tools verified and ready
-🎯 Target: PRODUCTION environment
-
-Are you sure you want to deploy to PRODUCTION?
-
-Build: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}
-Method: Ansible automation
-"""
+                        deploymentMessage = "⚠️ PRODUCTION DEPLOYMENT ⚠️\n\nAre you sure you want to deploy to PRODUCTION?\n\nBuild: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}\nMethod: Ansible automation"
                     }
                     
                     def approver = input message: deploymentMessage,
@@ -466,7 +48,8 @@ Method: Ansible automation
                     echo "Deployment approved by: ${env.DEPLOYMENT_APPROVER}"
                     echo "Deploying to: ${params.ENVIRONMENT}"
                     echo "Build to deploy: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}"
-                    echo "Tool check: ${params.SKIP_TOOL_CHECK ? 'Skipped' : 'Completed'}"
+                    echo "Server setup: ${params.SKIP_SERVER_SETUP ? 'Skip' : 'Run'}"
+                    echo "Post-deploy action: ${params.POST_DEPLOY_ACTION}"
                 }
             }
         }
@@ -517,9 +100,16 @@ Method: Ansible automation
             steps {
                 script {
                     sh '''
-                        echo "=== Setting up Ansible environment ==="
+                        # Debug current location
+                        echo "=== Debug Information ==="
+                        echo "Current directory: $(pwd)"
+                        echo "Files in current directory:"
+                        ls -la
                         
-                        # Find Ansible binary
+                        # Find Ansible binary directly
+                        echo "Locating Ansible installation..."
+                        
+                        # Check multiple possible locations
                         ANSIBLE_BINARY=""
                         POSSIBLE_PATHS=(
                             "/usr/local/bin/ansible"
@@ -536,16 +126,33 @@ Method: Ansible automation
                             fi
                         done
                         
+                        # Test Ansible with direct path
+                        echo "Testing Ansible..."
+                        $ANSIBLE_BINARY --version
+                        
+                        # Store the path for later stages
                         echo "$ANSIBLE_BINARY" > /tmp/ansible_path
                         echo "ANSIBLE_DIR=$(dirname $ANSIBLE_BINARY)" > /tmp/ansible_env
                         
-                        # Create Ansible structure
-                        mkdir -p ansible/{inventories,playbooks}
-                        mkdir -p ansible/inventories/staging
-                        mkdir -p ansible/inventories/production
-                        
-                        # Create staging inventory
-                        cat > ansible/inventories/staging/hosts << 'EOF'
+                        # Check if ansible directory exists (be more flexible)
+                        if [ -d "ansible" ]; then
+                            echo "✅ Found ansible directory"
+                            echo "Contents of ansible directory:"
+                            ls -la ansible/
+                        elif [ -d "./ansible" ]; then
+                            echo "✅ Found ansible directory at ./ansible"
+                            echo "Contents of ansible directory:"
+                            ls -la ./ansible/
+                        else
+                            echo "❌ Ansible directory not found in current location"
+                            echo "Searching for ansible directory..."
+                            find . -name "ansible" -type d
+                            echo "Creating minimal ansible structure..."
+                            mkdir -p ansible/{inventories,playbooks}
+                            mkdir -p ansible/inventories/staging
+                            
+                            # Create minimal files
+                            cat > ansible/inventories/staging/hosts << 'EOF'
 [webservers]
 staging-server ansible_host=54.210.171.180 ansible_user=deploy
 
@@ -557,30 +164,16 @@ deploy_user=deploy
 deploy_path=/var/www/hello-world-app
 EOF
 
-                        # Create production inventory
-                        cat > ansible/inventories/production/hosts << 'EOF'
-[webservers]
-production-server ansible_host=YOUR_PROD_IP ansible_user=deploy
-
-[all:vars]
-ansible_ssh_private_key_file=~/.ssh/deploy_key
-rails_env=production
-app_name=hello-world-app
-deploy_user=deploy
-deploy_path=/var/www/hello-world-app
-EOF
-
-                        # Create Rails deployment playbook using script files
-                        cat > ansible/playbooks/deploy.yml << 'DEPLOY_EOF'
+                            cat > ansible/playbooks/deploy.yml << 'EOF'
 ---
-- name: Deploy Beautiful Rails Application
+- name: Deploy Application
   hosts: webservers
   become: yes
   vars:
     app_archive_path: "/tmp/{{ app_name }}-{{ build_number | default('latest') }}.tar.gz"
   
   tasks:
-    - name: Upload artifact
+    - name: Upload artifact to server
       shell: |
         scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "{{ local_artifact_path }}" deploy@{{ ansible_host }}:/tmp/{{ app_name }}-{{ build_number }}.tar.gz
       delegate_to: localhost
@@ -602,233 +195,53 @@ EOF
         group: "{{ deploy_user }}"
         remote_src: yes
 
-    - name: Create Rails routes script
-      copy:
-        dest: /tmp/create_routes.rb
-        content: |
-          File.open('config/routes.rb', 'w') do |f|
-            f.puts "Rails.application.routes.draw do"
-            f.puts "  root 'welcome#index'"
-            f.puts "  get '/health', to: proc { [200, { 'Content-Type' => 'application/json' }, [{ status: 'ok', environment: Rails.env }.to_json]] }"
-            f.puts "end"
-          end
-
-    - name: Create Rails controller script
-      copy:
-        dest: /tmp/create_controller.rb
-        content: |
-          require 'fileutils'
-          FileUtils.mkdir_p('app/controllers')
-          File.open('app/controllers/welcome_controller.rb', 'w') do |f|
-            f.puts "class WelcomeController < ApplicationController"
-            f.puts "  def index"
-            f.puts "    @info = {"
-            f.puts "      environment: Rails.env,"
-            f.puts "      rails_version: Rails.version,"
-            f.puts "      ruby_version: RUBY_VERSION,"
-            f.puts "      deployed_at: Time.current"
-            f.puts "    }"
-            f.puts "  end"
-            f.puts "end"
-          end
-
-    - name: Create Rails layout script
-      copy:
-        dest: /tmp/create_layout.sh
-        mode: '0755'
-        content: |
-          #!/bin/bash
-          mkdir -p app/views/layouts
-          cat > app/views/layouts/application.html.erb << 'LAYOUT_END'
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Rails Deployment Success</title>
-              <meta name="viewport" content="width=device-width,initial-scale=1">
-              <style>
-                body { font-family: system-ui, sans-serif; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
-                .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
-                .header { background: rgba(255,255,255,0.95); padding: 40px; border-radius: 20px; text-align: center; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-                .content { background: rgba(255,255,255,0.95); padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-                .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }
-                .card { background: #f8f9fa; padding: 20px; border-radius: 15px; border-left: 4px solid #28a745; }
-                .badge { display: inline-block; padding: 6px 12px; border-radius: 15px; font-size: 0.9em; font-weight: bold; margin: 5px; background: #28a745; color: white; }
-                h1 { color: #2563eb; margin: 0; font-size: 2.5em; }
-                h3 { color: #374151; margin-top: 0; }
-                .status { font-size: 1.3em; color: #28a745; margin: 20px 0; }
-              </style>
-            </head>
-            <body>
-              <div class="container">
-                <div class="header">
-                  <h1>🚀 Rails Deployment Success!</h1>
-                  <p class="status">✅ Application Successfully Deployed</p>
-                </div>
-                <div class="content">
-                  <%= yield %>
-                </div>
-              </div>
-            </body>
-          </html>
-          LAYOUT_END
-
-    - name: Create Rails view script
-      copy:
-        dest: /tmp/create_view.sh
-        mode: '0755'
-        content: |
-          #!/bin/bash
-          mkdir -p app/views/welcome
-          cat > app/views/welcome/index.html.erb << 'VIEW_END'
-          <div class="grid">
-            <div class="card">
-              <h3>🎯 Deployment Info</h3>
-              <% if @info %>
-                <p><strong>Environment:</strong> <%= @info[:environment].upcase %></p>
-                <p><strong>Deployed:</strong> <%= @info[:deployed_at].strftime("%B %d, %Y at %I:%M %p") %></p>
-              <% end %>
-            </div>
-            
-            <div class="card">
-              <h3>🛠️ Tech Stack</h3>
-              <p><strong>Rails:</strong> <%= Rails.version %></p>
-              <p><strong>Ruby:</strong> <%= RUBY_VERSION %></p>
-              <p><strong>Environment:</strong> <%= Rails.env %></p>
-            </div>
-            
-            <div class="card">
-              <h3>📊 Status</h3>
-              <p>✅ Rails Server Running</p>
-              <p>✅ Database Connected</p>
-              <p>✅ Ready to Serve</p>
-            </div>
-          </div>
-
-          <div style="text-align: center; margin-top: 30px; padding: 20px; background: #e8f5e8; border-radius: 15px;">
-            <h3>🎉 CI/CD Success!</h3>
-            <p>Deployed with Jenkins and Ansible automation</p>
-            <span class="badge">Tool Verification</span>
-            <span class="badge">Rails Deployment</span>
-            <span class="badge">Beautiful UI</span>
-          </div>
-          VIEW_END
-
-    - name: Setup Rails with beautiful UI
+    - name: Stop existing servers
       shell: |
-        cd {{ deploy_path }}/{{ rails_env }}/current
-        
-        echo "🎨 Setting up beautiful Rails application..."
-        
-        # Ruby environment
-        export PATH="/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:$PATH"
-        eval "$(rbenv init -)"
-        export RAILS_ENV={{ rails_env }}
-        
-        # Install gems
-        bundle install --without development test
-        
-        # Create Rails components using scripts
-        ruby /tmp/create_routes.rb
-        ruby /tmp/create_controller.rb
-        bash /tmp/create_layout.sh
-        bash /tmp/create_view.sh
-        
-        echo "✅ Beautiful Rails UI components created"
-      become_user: "{{ deploy_user }}"
-      environment:
-        PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
-
-    - name: Database operations
-      shell: |
-        cd {{ deploy_path }}/{{ rails_env }}/current
-        
-        export PATH="/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:$PATH"
-        eval "$(rbenv init -)"
-        export RAILS_ENV={{ rails_env }}
-        
-        echo "🗄️ Database operations..."
-        
-        # Database setup
-        RAILS_ENV={{ rails_env }} bundle exec rake db:create 2>/dev/null || echo "Database exists"
-        RAILS_ENV={{ rails_env }} bundle exec rake db:migrate
-        RAILS_ENV={{ rails_env }} bundle exec rake assets:precompile
-        
-        echo "✅ Database operations completed"
-      become_user: "{{ deploy_user }}"
-      environment:
-        PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
-        RAILS_ENV: "{{ rails_env }}"
-
-    - name: Start Rails server
-      shell: |
-        # Stop existing servers
         pkill -f 'python.*http.server' || true
         pkill -f 'rails server' || true
-        sleep 5
-        
-        cd {{ deploy_path }}/{{ rails_env }}/current
-        
-        export PATH="/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:$PATH"
-        eval "$(rbenv init -)"
-        export RAILS_ENV={{ rails_env }}
-        
-        echo "🚀 Starting beautiful Rails application..."
-        
-        # Start Rails server
-        nohup bundle exec rails server -e {{ rails_env }} -p 3000 -b 0.0.0.0 > log/rails.log 2>&1 &
-        echo $! > tmp/pids/server.pid
-        
-        sleep 15
-        
-        if ps aux | grep -v grep | grep 'rails server'; then
-          echo "✅ Beautiful Rails UI started successfully"
-        else
-          echo "❌ Rails server failed to start"
-          tail -20 log/rails.log
-          exit 1
-        fi
+        sleep 2
       become_user: "{{ deploy_user }}"
+      ignore_errors: yes
+
+    - name: Start server
+      shell: |
+        cd {{ deploy_path }}/{{ rails_env }}/current
+        nohup python3 -m http.server 3000 > /tmp/server.log 2>&1 &
+        sleep 5
+      become_user: "{{ deploy_user }}"
+      ignore_errors: yes
+
+    - name: Wait for server
+      pause:
+        seconds: 10
 
     - name: Verify deployment
       shell: |
-        echo "🔍 VERIFYING BEAUTIFUL RAILS DEPLOYMENT"
-        echo "========================================"
-        
-        # Check server
-        if ps aux | grep -v grep | grep 'rails server'; then
-          echo "✅ Rails server running"
+        if ps aux | grep -v grep | grep 'python.*http.server'; then
+          echo "✅ Server is running"
+        else
+          echo "❌ Server not running"
         fi
         
         if netstat -tlnp | grep :3000; then
           echo "✅ Port 3000 listening"
+        else
+          echo "❌ Port 3000 not listening"
         fi
-        
-        # Test UI
-        if curl -s http://localhost:3000 | grep -i "deployment.*success"; then
-          echo "✅ Beautiful Rails UI confirmed"
-        fi
-        
-        echo "🎨 Beautiful UI live at: http://{{ ansible_host }}:3000"
       become_user: "{{ deploy_user }}"
       ignore_errors: yes
 
-    - name: Success message
+    - name: Display success
       debug:
         msg: |
-          🎉 BEAUTIFUL RAILS UI DEPLOYMENT SUCCESS! 🎉
-          
-          ✨ Your stunning Rails application is now live!
-          🌍 Access: http://{{ ansible_host }}:3000/
-          🏥 Health: http://{{ ansible_host }}:3000/health
-          
-          Features deployed:
-          ✅ Modern responsive design
-          ✅ Deployment dashboard
-          ✅ Technical stack display
-          ✅ Status indicators
-DEPLOY_EOF
+          🎉 Deployment completed!
+          URL: http://{{ ansible_host }}:3000
+          SSH: ssh deploy@{{ ansible_host }}
+EOF
+                            echo "✅ Created minimal ansible structure"
+                        fi
                         
-                        echo "✅ Ansible deployment structure created"
+                        echo "✅ Ansible environment verified"
                     '''
                 }
             }
@@ -845,7 +258,13 @@ DEPLOY_EOF
                         echo "Artifact: $ARTIFACT_FILE"
                         echo "Build number: $BUILD_NUM"
                         
-                        # Create variables file
+                        # Copy artifact to /tmp for local access
+                        cp $ARTIFACT_FILE /tmp/hello-world-app-${BUILD_NUM}.tar.gz
+                        
+                        # Also keep the artifact in workspace for SCP transfer
+                        echo "Artifact location: $(pwd)/$ARTIFACT_FILE"
+                        
+                        # Create ansible variables file
                         cat > ansible/extra_vars.yml << EOF
 build_number: ${BUILD_NUM}
 app_archive_path: /tmp/hello-world-app-${BUILD_NUM}.tar.gz
@@ -867,16 +286,25 @@ EOF
                 script {
                     dir('ansible') {
                         sh '''
+                            # Load Ansible path
                             source /tmp/ansible_env
                             ANSIBLE_BINARY=$(cat /tmp/ansible_path)
                             
-                            echo "Testing connectivity..."
+                            echo "Testing Ansible connectivity..."
+                            echo "Using Ansible binary: $ANSIBLE_BINARY"
+                            echo "Using inventory: inventories/${ENVIRONMENT}/hosts"
+                            
+                            # Test ping with direct binary path
                             $ANSIBLE_BINARY -i inventories/${ENVIRONMENT}/hosts webservers -m ping
                             
                             if [ $? -eq 0 ]; then
-                                echo "✅ Connectivity test passed"
+                                echo "✅ Ansible connectivity test passed"
                             else
-                                echo "❌ Connectivity test failed"
+                                echo "❌ Ansible connectivity test failed"
+                                echo "Debugging information:"
+                                echo "Current directory: $(pwd)"
+                                echo "Inventory file contents:"
+                                cat inventories/${ENVIRONMENT}/hosts
                                 exit 1
                             fi
                         '''
@@ -885,25 +313,117 @@ EOF
             }
         }
         
-        stage('Deploy Beautiful Rails Application') {
+//         stage('Server Setup') {
+//             when {
+//                 expression { !params.SKIP_SERVER_SETUP }
+//             }
+//             steps {
+//                 script {
+//                     dir('ansible') {
+//                         sh '''
+//                             # Load Ansible path
+//                             source /tmp/ansible_env
+//                             ANSIBLE_BINARY=$(cat /tmp/ansible_path)
+//                             ANSIBLE_PLAYBOOK_BINARY="$(dirname $ANSIBLE_BINARY)/ansible-playbook"
+                            
+//                             echo "Running initial server setup..."
+                            
+//                             # Check if setup playbook exists, if not create a basic one
+//                             if [ ! -f "playbooks/setup-server.yml" ]; then
+//                                 echo "Creating setup-server.yml playbook..."
+//                                 cat > playbooks/setup-server.yml << 'EOF'
+// ---
+// - name: Initial Server Setup
+//   hosts: webservers
+//   become: yes
+  
+//   tasks:
+//     - name: Update apt cache
+//       apt:
+//         update_cache: yes
+//         cache_valid_time: 3600
+
+//     - name: Install system dependencies
+//       apt:
+//         name:
+//           - curl
+//           - wget
+//           - git
+//           - build-essential
+//           - python3
+//           - unzip
+//         state: present
+
+//     - name: Create deployment directories
+//       file:
+//         path: "{{ item }}"
+//         state: directory
+//         owner: "{{ deploy_user }}"
+//         group: "{{ deploy_user }}"
+//         mode: '0755'
+//       loop:
+//         - "{{ deploy_path }}"
+//         - "{{ deploy_path }}/{{ rails_env }}"
+//         - "{{ deploy_path }}/{{ rails_env }}/releases"
+//         - "{{ deploy_path }}/{{ rails_env }}/shared"
+//         - "{{ deploy_path }}/{{ rails_env }}/current"
+
+//     - name: Ensure deploy user exists
+//       user:
+//         name: "{{ deploy_user }}"
+//         shell: /bin/bash
+//         create_home: yes
+//         state: present
+
+//     - name: Set proper ownership
+//       file:
+//         path: "{{ deploy_path }}"
+//         owner: "{{ deploy_user }}"
+//         group: "{{ deploy_user }}"
+//         state: directory
+//         recurse: yes
+// EOF
+//                             fi
+                            
+//                             # Run setup playbook
+//                             $ANSIBLE_PLAYBOOK_BINARY -i inventories/${ENVIRONMENT}/hosts playbooks/setup-server.yml -v
+                            
+//                             if [ $? -eq 0 ]; then
+//                                 echo "✅ Server setup completed successfully"
+//                             else
+//                                 echo "❌ Server setup failed"
+//                                 exit 1
+//                             fi
+//                         '''
+//                     }
+//                 }
+//             }
+//         }
+        
+        stage('Deploy with Ansible') {
             steps {
                 script {
                     dir('ansible') {
                         sh '''
+                            # Load Ansible path
                             source /tmp/ansible_env
                             ANSIBLE_BINARY=$(cat /tmp/ansible_path)
                             ANSIBLE_PLAYBOOK_BINARY="$(dirname $ANSIBLE_BINARY)/ansible-playbook"
                             
-                            echo "🚀 Deploying beautiful Rails application..."
+                            echo "Starting Ansible deployment..."
+                            echo "Environment: ${ENVIRONMENT}"
+                            echo "Using binary: $ANSIBLE_PLAYBOOK_BINARY"
+                            echo "Deploying artifact: $(cat extra_vars.yml | grep app_archive_path)"
                             
-                            $ANSIBLE_PLAYBOOK_BINARY -i inventories/${ENVIRONMENT}/hosts playbooks/deploy.yml \\
-                                --extra-vars @extra_vars.yml \\
+                            # Run deployment playbook with direct binary path
+                            $ANSIBLE_PLAYBOOK_BINARY -i inventories/${ENVIRONMENT}/hosts playbooks/deploy.yml \
+                                --extra-vars @extra_vars.yml \
                                 -v
                             
                             if [ $? -eq 0 ]; then
-                                echo "✅ Beautiful Rails UI deployed successfully!"
+                                echo "✅ Ansible deployment completed successfully"
                             else
-                                echo "❌ Deployment failed"
+                                echo "❌ Ansible deployment failed"
                                 exit 1
                             fi
                         '''
@@ -919,28 +439,30 @@ EOF
                         string(credentialsId: "ec2-${params.ENVIRONMENT}-host", variable: 'EC2_HOST')
                     ]) {
                         sh '''
-                            echo "🏥 Verifying beautiful Rails UI..."
+                            echo "Performing post-deployment verification..."
                             
-                            sleep 25
+                            # Wait for application to start
+                            sleep 15
                             
-                            MAX_RETRIES=10
+                            # Health check
+                            MAX_RETRIES=12
                             RETRY_COUNT=0
                             
                             while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-                                echo "Verification attempt $((RETRY_COUNT + 1))/$MAX_RETRIES"
+                                echo "Health check attempt $((RETRY_COUNT + 1))/$MAX_RETRIES"
                                 
-                                if curl -f -s -o /dev/null http://${EC2_HOST}:3000/; then
-                                    echo "✅ Beautiful Rails UI is live!"
+                                if curl -f -s -o /dev/null http://${EC2_HOST}:3000/health || curl -f -s -o /dev/null http://${EC2_HOST}:3000/; then
+                                    echo "✅ Application is responding!"
                                     break
                                 else
-                                    echo "⏳ Waiting for UI..."
+                                    echo "⏳ Application not ready, retrying in 10 seconds..."
                                     sleep 10
                                     RETRY_COUNT=$((RETRY_COUNT + 1))
                                 fi
                             done
                             
                             if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-                                echo "❌ UI verification failed"
+                                echo "❌ Health check failed after $MAX_RETRIES attempts"
                                 exit 1
                             fi
                         '''
@@ -948,6 +470,135 @@ EOF
                 }
             }
         }
+        
+//         stage('Create User') {
+//             when {
+//                 expression { params.POST_DEPLOY_ACTION == 'create_user' }
+//             }
+//             steps {
+//                 script {
+//                     def userChoice = input(
+//                         message: 'Create new user on server?',
+//                         parameters: [
+//                             string(name: 'USERNAME', description: 'Enter username', defaultValue: ''),
+//                             choice(name: 'ACCESS_LEVEL', choices: ['1', '2', '3'], description: '1=Admin (full access), 2=Operations (no delete), 3=Read-only'),
+//                             booleanParam(name: 'COPY_SSH_KEY', defaultValue: false, description: 'Copy SSH key from deploy user?')
+//                         ]
+//                     )
+                    
+//                     if (userChoice.USERNAME) {
+//                         dir('ansible') {
+//                             sh """
+//                                 # Load Ansible path
+//                                 source /tmp/ansible_env
+//                                 ANSIBLE_BINARY=\$(cat /tmp/ansible_path)
+//                                 ANSIBLE_PLAYBOOK_BINARY="\$(dirname \$ANSIBLE_BINARY)/ansible-playbook"
+                                
+//                                 echo "Creating user: ${userChoice.USERNAME}"
+//                                 echo "Access level: ${userChoice.ACCESS_LEVEL}"
+//                                 echo "Copy SSH: ${userChoice.COPY_SSH_KEY}"
+                                
+//                                 # Create user variables file
+//                                 cat > user_vars.yml << EOF
+// new_username: ${userChoice.USERNAME}
+// user_access_level: ${userChoice.ACCESS_LEVEL}
+// copy_ssh_key: ${userChoice.COPY_SSH_KEY}
+// EOF
+                                
+//                                 # Check if create-user playbook exists, if not create a basic one
+//                                 if [ ! -f "playbooks/create-user.yml" ]; then
+//                                     echo "Creating create-user.yml playbook..."
+//                                     cat > playbooks/create-user.yml << 'EOF2'
+// ---
+// - name: Create User with Access Control
+//   hosts: webservers
+//   become: yes
+  
+//   tasks:
+//     - name: Create user groups (if not exist)
+//       group:
+//         name: "{{ item }}"
+//         state: present
+//       loop:
+//         - admin_group
+//         - ops_group
+//         - readonly_group
+
+//     - name: Determine user group based on access level
+//       set_fact:
+//         user_group: "{{ 'admin_group' if user_access_level == '1' else 'ops_group' if user_access_level == '2' else 'readonly_group' }}"
+
+//     - name: Create user
+//       user:
+//         name: "{{ new_username }}"
+//         shell: /bin/bash
+//         groups: "{{ user_group }}"
+//         append: yes
+//         create_home: yes
+//         state: present
+
+//     - name: Setup SSH directory for new user
+//       file:
+//         path: "/home/{{ new_username }}/.ssh"
+//         state: directory
+//         owner: "{{ new_username }}"
+//         group: "{{ new_username }}"
+//         mode: '0700'
+//       when: copy_ssh_key | bool
+
+//     - name: Copy SSH key from deploy user
+//       copy:
+//         src: "/home/{{ deploy_user }}/.ssh/authorized_keys"
+//         dest: "/home/{{ new_username }}/.ssh/authorized_keys"
+//         owner: "{{ new_username }}"
+//         group: "{{ new_username }}"
+//         mode: '0600'
+//         remote_src: yes
+//       when: copy_ssh_key | bool
+
+//     - name: Setup basic sudoers for groups
+//       lineinfile:
+//         path: /etc/sudoers.d/user_access
+//         line: "{{ item }}"
+//         create: yes
+//         mode: '0440'
+//       loop:
+//         - "# User access control"
+//         - "%admin_group ALL=(ALL) NOPASSWD: ALL"
+//         - "%ops_group ALL=(ALL) NOPASSWD: ALL, !/bin/rm, !/bin/rmdir, !/usr/bin/rm, !/usr/bin/rmdir"
+//         - "%readonly_group ALL=(ALL) NOPASSWD: /bin/cat, /bin/less, /bin/ls, /usr/bin/tail, /usr/bin/head"
+
+//     - name: Display user creation result
+//       debug:
+//         msg: |
+//           ✅ User '{{ new_username }}' created successfully!
+//           👥 Group: {{ user_group }}
+//           🔑 SSH Access: {{ 'Enabled' if copy_ssh_key | bool else 'Disabled' }}
+//           🔗 Login: ssh {{ new_username }}@{{ ansible_host }}
+          
+//           📋 Access Level Details:
+//           {% if user_access_level == '1' %}
+//           🔴 ADMIN: Full system access - use with caution!
+//           {% elif user_access_level == '2' %}
+//           🟡 OPERATIONS: Can read/write but not delete files (rm blocked)
+//           {% else %}
+//           🟢 READ-ONLY: Can only view files and directories
+//           {% endif %}
+// EOF2
+//                                 fi
+                                
+//                                 # Run user creation playbook
+//                                 \$ANSIBLE_PLAYBOOK_BINARY -i inventories/${ENVIRONMENT}/hosts playbooks/create-user.yml \
+//                                     --extra-vars @user_vars.yml \
+//                                     -v
+//                             """
+//                         }
+//                     } else {
+//                         echo "No username provided, skipping user creation"
+//                     }
+//                 }
+//             }
+//         }
         
         stage('Deployment Summary') {
             steps {
@@ -957,43 +608,23 @@ EOF
                     ]) {
                         sh '''
                             echo "
-🎉 BEAUTIFUL RAILS UI DEPLOYMENT SUCCESS! 🎉
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📊 Deployment Details:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎉 Ansible Deployment Summary
+================================
 Environment: ${ENVIRONMENT}
 Server: ${EC2_HOST}
 Approved by: ${DEPLOYMENT_APPROVER}
 Build: ${BUILD_NUMBER_TO_DEPLOY:-latest}
-Type: ✨ Beautiful Modern Rails UI
-URL: http://${EC2_HOST}:3000
-Time: $(date)
+Method: Ansible automation
+Application URL: http://${EC2_HOST}:3000
+Deployment time: $(date)
+================================
 
-🎨 UI Features Deployed:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✨ Modern gradient background
-✨ Glassmorphism cards
-✨ Responsive design
-✨ Deployment dashboard
-✨ Technical stack display
-✨ Status indicators
+📋 Available Access Levels:
+1. Admin: Full system access
+2. Operations: Can read/write but not delete
+3. Read-only: View files only
 
-🚀 Rails Operations:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ RAILS_ENV=${ENVIRONMENT} rake db:create
-✅ RAILS_ENV=${ENVIRONMENT} rake db:migrate
-✅ RAILS_ENV=${ENVIRONMENT} rake assets:precompile
-✅ Beautiful UI components created
-✅ Rails server started
-
-🔗 Access Your Beautiful Application:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🌍 Main UI: http://${EC2_HOST}:3000/
-🏥 Health: http://${EC2_HOST}:3000/health
-🔧 SSH: ssh deploy@${EC2_HOST}
-
-🎯 SUCCESS: Beautiful Rails UI is now live!
+🔗 SSH Access: ssh <username>@${EC2_HOST}
                             "
                         '''
                     }
@@ -1004,11 +635,43 @@ Time: $(date)
     
     post {
         success {
-            echo "✅ Beautiful Rails UI deployment completed successfully!"
+            echo "✅ Ansible deployment to ${params.ENVIRONMENT} completed successfully!"
+            
+            script {
+                try {
+                    withCredentials([
+                        string(credentialsId: 'slack-webhook-url', variable: 'SLACK_WEBHOOK')
+                    ]) {
+                        sh '''
+                            curl -X POST -H 'Content-type: application/json' \
+                                --data '{"text":"✅ Ansible Deployment Success: '${APP_NAME}' to '${ENVIRONMENT}' - Build #'${BUILD_NUMBER}' (by '${DEPLOYMENT_APPROVER}')"}' \
+                                $SLACK_WEBHOOK
+                        '''
+                    }
+                } catch (Exception e) {
+                    echo "Notification failed: ${e.message}"
+                }
+            }
         }
         
         failure {
-            echo "❌ Deployment failed!"
+            echo "❌ Ansible deployment to ${params.ENVIRONMENT} failed!"
+            
+            script {
+                try {
+                    withCredentials([
+                        string(credentialsId: 'slack-webhook-url', variable: 'SLACK_WEBHOOK')
+                    ]) {
+                        sh '''
+                            curl -X POST -H 'Content-type: application/json' \
+                                --data '{"text":"❌ Ansible Deployment Failed: '${APP_NAME}' to '${ENVIRONMENT}' - Build #'${BUILD_NUMBER}' (by '${DEPLOYMENT_APPROVER}')"}' \
+                                $SLACK_WEBHOOK
+                        '''
+                    }
+                } catch (Exception e) {
+                    echo "Failed notification: ${e.message}"
+                }
+            }
         }
         
         always {
@@ -1016,7 +679,7 @@ Time: $(date)
                 sh '''
                     rm -f hello-world-app-*.tar.gz
                     rm -f ansible/extra_vars.yml
-                    rm -rf temp_ansible
+                    rm -f ansible/user_vars.yml
                 '''
             }
             cleanWs()
