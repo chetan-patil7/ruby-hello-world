@@ -1,5 +1,5 @@
 [webservers]
-staging-server ansible_host=3.237.64.25 ansible_user=deploy
+staging-server ansible_host=54.210.171.180 ansible_user=deploy
 [contabo_dev]
 dev-server-1 ansible_host=YOUR_DEV_SERVER_1_IP
 dev-server-2 ansible_host=YOUR_DEV_SERVER_2_IP
