@@ -173,6 +173,16 @@ EOF
     app_archive_path: "/tmp/{{ app_name }}-{{ build_number | default('latest') }}.tar.gz"
   
   tasks:
+    - name: Transfer application artifact to server
+      copy:
+        src: "{{ local_artifact_path }}"
+        dest: "{{ app_archive_path }}"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: '0644'
+      delegate_to: localhost
+      become: no
+
     - name: Create directories
       file:
         path: "{{ deploy_path }}/{{ rails_env }}/current"
@@ -180,6 +190,16 @@ EOF
         owner: "{{ deploy_user }}"
         group: "{{ deploy_user }}"
         mode: '0755'
+
+    - name: Verify artifact exists on server
+      stat:
+        path: "{{ app_archive_path }}"
+      register: artifact_check
+
+    - name: Fail if artifact not found
+      fail:
+        msg: "Artifact not found at {{ app_archive_path }}"
+      when: not artifact_check.stat.exists
 
     - name: Extract application
       unarchive:
@@ -258,6 +278,11 @@ EOF
           Server Response: {{ 'SUCCESS - Server is responding' if server_response is succeeded else 'Server not responding yet' }}
           Status Code: {{ server_response.status | default('No response') }}
 
+    - name: Cleanup artifact file
+      file:
+        path: "{{ app_archive_path }}"
+        state: absent
+
     - name: Display deployment success
       debug:
         msg: |
@@ -287,13 +312,17 @@ EOF
                         echo "Artifact: $ARTIFACT_FILE"
                         echo "Build number: $BUILD_NUM"
                         
-                        # Copy artifact to /tmp for Ansible
+                        # Copy artifact to /tmp for local access
                         cp $ARTIFACT_FILE /tmp/hello-world-app-${BUILD_NUM}.tar.gz
+                        
+                        # Also keep the artifact in workspace for SCP transfer
+                        echo "Artifact location: $(pwd)/$ARTIFACT_FILE"
                         
                         # Create ansible variables file
                         cat > ansible/extra_vars.yml << EOF
 build_number: ${BUILD_NUM}
 app_archive_path: /tmp/hello-world-app-${BUILD_NUM}.tar.gz
+local_artifact_path: $(pwd)/${ARTIFACT_FILE}
 environment: ${ENVIRONMENT}
 deployed_by: ${DEPLOYMENT_APPROVER}
 deployed_at: $(date)
