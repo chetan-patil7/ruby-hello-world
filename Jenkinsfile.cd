@@ -68,8 +68,8 @@ ansible_ssh_private_key_file=~/.ssh/deploy_key
 deploy_user=deploy
 EOF
 
-                        # Create comprehensive tool verification playbook with FIXED YAML syntax
-                        cat > temp_ansible/playbooks/verify_and_install_tools.yml << 'EOF'
+                        # Create comprehensive tool verification playbook with FIXED syntax
+                        cat > temp_ansible/playbooks/verify_and_install_tools.yml << 'PLAYBOOK_EOF'
 ---
 - name: Comprehensive Server Tool Verification and Installation
   hosts: webservers
@@ -111,227 +111,143 @@ EOF
       - libmagickwand-dev
   
   tasks:
-    - name: Create temporary directory for status tracking
+    - name: Create tool check directory
       file:
         path: /tmp/tool_check
         state: directory
         mode: '0755'
 
-    - name: Comprehensive Tool Audit
-      script: |
-        #!/bin/bash
-        echo "🔍 COMPREHENSIVE SERVER TOOL AUDIT"
-        echo "=================================="
-        echo "Date: $(date)"
-        echo "Server: $(hostname)"
-        echo "User: $(whoami)"
-        echo ""
-        
-        # Initialize tracking variables
-        MISSING_PACKAGES=""
-        MISSING_TOOLS=""
-        INSTALL_REQUIRED=false
-        
-        echo "📦 SYSTEM PACKAGES AUDIT:"
-        echo "========================"
-        for pkg in curl wget git build-essential postgresql nodejs python3 unzip redis-server imagemagick; do
-          if dpkg -l 2>/dev/null | grep -q "^ii.*$pkg "; then
-            echo "  ✅ $pkg - installed"
-          else
-            echo "  ❌ $pkg - MISSING"
-            MISSING_PACKAGES="$MISSING_PACKAGES $pkg"
-            INSTALL_REQUIRED=true
-          fi
-        done
-        
-        echo ""
-        echo "💎 RUBY ENVIRONMENT AUDIT:"
-        echo "========================="
-        
-        # Check rbenv
-        if [ -d "/home/{{ deploy_user }}/.rbenv" ]; then
-          echo "  ✅ rbenv - installed at /home/{{ deploy_user }}/.rbenv"
-        else
-          echo "  ❌ rbenv - NOT INSTALLED"
-          MISSING_TOOLS="$MISSING_TOOLS rbenv"
-          INSTALL_REQUIRED=true
-        fi
-        
-        # Check Ruby
-        if command -v ruby >/dev/null 2>&1; then
-          RUBY_VERSION=$(ruby --version)
-          echo "  ✅ Ruby - $RUBY_VERSION"
-          if echo "$RUBY_VERSION" | grep -q "{{ required_tools.ruby_version }}"; then
-            echo "    ✅ Required version {{ required_tools.ruby_version }} detected"
-          else
-            echo "    ⚠️  Version mismatch - required: {{ required_tools.ruby_version }}"
-            MISSING_TOOLS="$MISSING_TOOLS ruby-version"
-            INSTALL_REQUIRED=true
-          fi
-        else
-          echo "  ❌ Ruby - NOT INSTALLED"
-          MISSING_TOOLS="$MISSING_TOOLS ruby"
-          INSTALL_REQUIRED=true
-        fi
-        
-        # Check Bundler
-        if command -v bundle >/dev/null 2>&1; then
-          BUNDLER_VERSION=$(bundle --version)
-          echo "  ✅ Bundler - $BUNDLER_VERSION"
-        else
-          echo "  ❌ Bundler - NOT INSTALLED"
-          MISSING_TOOLS="$MISSING_TOOLS bundler"
-          INSTALL_REQUIRED=true
-        fi
-        
-        echo ""
-        echo "🟢 NODE.JS ENVIRONMENT AUDIT:"
-        echo "============================"
-        
-        # Check Node.js
-        if command -v node >/dev/null 2>&1; then
-          NODE_VERSION=$(node --version)
-          echo "  ✅ Node.js - $NODE_VERSION"
-          if echo "$NODE_VERSION" | grep -q "v18"; then
-            echo "    ✅ Compatible version detected"
-          else
-            echo "    ⚠️  Version mismatch - recommended: v18.x"
-          fi
-        else
-          echo "  ❌ Node.js - NOT INSTALLED"
-          MISSING_TOOLS="$MISSING_TOOLS nodejs"
-          INSTALL_REQUIRED=true
-        fi
-        
-        # Check npm
-        if command -v npm >/dev/null 2>&1; then
-          NPM_VERSION=$(npm --version)
-          echo "  ✅ npm - $NPM_VERSION"
-        else
-          echo "  ❌ npm - NOT INSTALLED"
-          MISSING_TOOLS="$MISSING_TOOLS npm"
-          INSTALL_REQUIRED=true
-        fi
-        
-        echo ""
-        echo "🐘 POSTGRESQL AUDIT:"
-        echo "==================="
-        
-        # Check PostgreSQL client
-        if command -v psql >/dev/null 2>&1; then
-          PSQL_VERSION=$(psql --version)
-          echo "  ✅ PostgreSQL client - $PSQL_VERSION"
-        else
-          echo "  ❌ PostgreSQL client - NOT INSTALLED"
-          MISSING_TOOLS="$MISSING_TOOLS postgresql-client"
-          INSTALL_REQUIRED=true
-        fi
-        
-        # Check PostgreSQL service
-        if systemctl is-active postgresql >/dev/null 2>&1; then
-          echo "  ✅ PostgreSQL service - RUNNING"
-        elif systemctl is-enabled postgresql >/dev/null 2>&1; then
-          echo "  ⚠️  PostgreSQL service - installed but not running"
-        else
-          echo "  ❌ PostgreSQL service - NOT INSTALLED"
-          MISSING_TOOLS="$MISSING_TOOLS postgresql-service"
-          INSTALL_REQUIRED=true
-        fi
-        
-        # Check for deploy user in PostgreSQL
-        if command -v psql >/dev/null 2>&1 && systemctl is-active postgresql >/dev/null 2>&1; then
-          if sudo -u postgres psql -c "\\du" 2>/dev/null | grep -q "{{ deploy_user }}"; then
-            echo "  ✅ PostgreSQL user '{{ deploy_user }}' - exists"
-          else
-            echo "  ❌ PostgreSQL user '{{ deploy_user }}' - NOT CREATED"
-            MISSING_TOOLS="$MISSING_TOOLS postgresql-user"
-            INSTALL_REQUIRED=true
-          fi
-        fi
-        
-        echo ""
-        echo "🐍 PYTHON ENVIRONMENT AUDIT:"
-        echo "==========================="
-        
-        # Check Python3
-        if command -v python3 >/dev/null 2>&1; then
-          PYTHON_VERSION=$(python3 --version)
-          echo "  ✅ Python3 - $PYTHON_VERSION"
-        else
-          echo "  ❌ Python3 - NOT INSTALLED"
-          MISSING_TOOLS="$MISSING_TOOLS python3"
-          INSTALL_REQUIRED=true
-        fi
-        
-        # Check pip3
-        if command -v pip3 >/dev/null 2>&1; then
-          PIP_VERSION=$(pip3 --version)
-          echo "  ✅ pip3 - $PIP_VERSION"
-        else
-          echo "  ❌ pip3 - NOT INSTALLED"
-          MISSING_TOOLS="$MISSING_TOOLS pip3"
-          INSTALL_REQUIRED=true
-        fi
-        
-        echo ""
-        echo "🔧 ADDITIONAL TOOLS AUDIT:"
-        echo "========================="
-        
-        # Check Redis
-        if command -v redis-server >/dev/null 2>&1; then
-          echo "  ✅ Redis server - installed"
-          if systemctl is-active redis-server >/dev/null 2>&1; then
-            echo "    ✅ Redis service - running"
-          else
-            echo "    ⚠️  Redis service - not running"
-          fi
-        else
-          echo "  ❌ Redis server - NOT INSTALLED"
-          MISSING_TOOLS="$MISSING_TOOLS redis"
-          INSTALL_REQUIRED=true
-        fi
-        
-        # Check ImageMagick
-        if command -v convert >/dev/null 2>&1; then
-          IMAGEMAGICK_VERSION=$(convert --version | head -1)
-          echo "  ✅ ImageMagick - installed"
-        else
-          echo "  ❌ ImageMagick - NOT INSTALLED"
-          MISSING_TOOLS="$MISSING_TOOLS imagemagick"
-          INSTALL_REQUIRED=true
-        fi
-        
-        echo ""
-        echo "📋 AUDIT SUMMARY:"
-        echo "================"
-        
-        if [ "$INSTALL_REQUIRED" = "true" ] || [ "{{ force_installation }}" = "true" ]; then
-          echo "❌ INSTALLATION REQUIRED"
+    - name: Tool audit script
+      copy:
+        dest: /tmp/tool_audit.sh
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          echo "🔍 COMPREHENSIVE SERVER TOOL AUDIT"
+          echo "=================================="
+          echo "Date: $(date)"
+          echo "Server: $(hostname)"
           echo ""
-          if [ -n "$MISSING_PACKAGES" ]; then
-            echo "Missing system packages:$MISSING_PACKAGES"
-          fi
-          if [ -n "$MISSING_TOOLS" ]; then
-            echo "Missing/misconfigured tools:$MISSING_TOOLS"
-          fi
-          if [ "{{ force_installation }}" = "true" ]; then
-            echo "Force installation flag is set - will reinstall all tools"
+          
+          # Initialize tracking variables
+          MISSING_PACKAGES=""
+          MISSING_TOOLS=""
+          INSTALL_REQUIRED=false
+          
+          echo "📦 SYSTEM PACKAGES AUDIT:"
+          echo "========================"
+          for pkg in curl wget git build-essential postgresql nodejs python3 unzip redis-server imagemagick; do
+            if dpkg -l 2>/dev/null | grep -q "^ii.*$pkg "; then
+              echo "  ✅ $pkg - installed"
+            else
+              echo "  ❌ $pkg - MISSING"
+              MISSING_PACKAGES="$MISSING_PACKAGES $pkg"
+              INSTALL_REQUIRED=true
+            fi
+          done
+          
+          echo ""
+          echo "💎 RUBY ENVIRONMENT AUDIT:"
+          echo "========================="
+          
+          # Check rbenv
+          if [ -d "/home/{{ deploy_user }}/.rbenv" ]; then
+            echo "  ✅ rbenv - installed"
+          else
+            echo "  ❌ rbenv - NOT INSTALLED"
+            MISSING_TOOLS="$MISSING_TOOLS rbenv"
+            INSTALL_REQUIRED=true
           fi
           
-          echo "INSTALL_REQUIRED" > /tmp/tool_check/status
-        else
-          echo "✅ ALL TOOLS ARE PROPERLY INSTALLED"
-          echo "No installation required - server is ready for deployment"
-          echo "TOOLS_READY" > /tmp/tool_check/status
-        fi
-        
-        # Store missing items for installation
-        echo "$MISSING_PACKAGES" > /tmp/tool_check/missing_packages
-        echo "$MISSING_TOOLS" > /tmp/tool_check/missing_tools
+          # Check Ruby
+          if command -v ruby >/dev/null 2>&1; then
+            RUBY_VERSION=$(ruby --version)
+            echo "  ✅ Ruby - $RUBY_VERSION"
+          else
+            echo "  ❌ Ruby - NOT INSTALLED"
+            MISSING_TOOLS="$MISSING_TOOLS ruby"
+            INSTALL_REQUIRED=true
+          fi
+          
+          # Check Bundler
+          if command -v bundle >/dev/null 2>&1; then
+            BUNDLER_VERSION=$(bundle --version)
+            echo "  ✅ Bundler - $BUNDLER_VERSION"
+          else
+            echo "  ❌ Bundler - NOT INSTALLED"
+            MISSING_TOOLS="$MISSING_TOOLS bundler"
+            INSTALL_REQUIRED=true
+          fi
+          
+          echo ""
+          echo "🟢 NODE.JS ENVIRONMENT AUDIT:"
+          echo "============================"
+          
+          # Check Node.js
+          if command -v node >/dev/null 2>&1; then
+            NODE_VERSION=$(node --version)
+            echo "  ✅ Node.js - $NODE_VERSION"
+          else
+            echo "  ❌ Node.js - NOT INSTALLED"
+            MISSING_TOOLS="$MISSING_TOOLS nodejs"
+            INSTALL_REQUIRED=true
+          fi
+          
+          # Check npm
+          if command -v npm >/dev/null 2>&1; then
+            NPM_VERSION=$(npm --version)
+            echo "  ✅ npm - $NPM_VERSION"
+          else
+            echo "  ❌ npm - NOT INSTALLED"
+            MISSING_TOOLS="$MISSING_TOOLS npm"
+            INSTALL_REQUIRED=true
+          fi
+          
+          echo ""
+          echo "🐘 POSTGRESQL AUDIT:"
+          echo "==================="
+          
+          # Check PostgreSQL client
+          if command -v psql >/dev/null 2>&1; then
+            PSQL_VERSION=$(psql --version)
+            echo "  ✅ PostgreSQL client - $PSQL_VERSION"
+          else
+            echo "  ❌ PostgreSQL client - NOT INSTALLED"
+            MISSING_TOOLS="$MISSING_TOOLS postgresql-client"
+            INSTALL_REQUIRED=true
+          fi
+          
+          # Check PostgreSQL service
+          if systemctl is-active postgresql >/dev/null 2>&1; then
+            echo "  ✅ PostgreSQL service - RUNNING"
+          else
+            echo "  ❌ PostgreSQL service - NOT RUNNING"
+            MISSING_TOOLS="$MISSING_TOOLS postgresql-service"
+            INSTALL_REQUIRED=true
+          fi
+          
+          echo ""
+          echo "📋 AUDIT SUMMARY:"
+          echo "================"
+          
+          if [ "$INSTALL_REQUIRED" = "true" ] || [ "{{ force_installation }}" = "true" ]; then
+            echo "❌ INSTALLATION REQUIRED"
+            echo "INSTALL_REQUIRED" > /tmp/tool_check/status
+          else
+            echo "✅ ALL TOOLS ARE PROPERLY INSTALLED"
+            echo "TOOLS_READY" > /tmp/tool_check/status
+          fi
+          
+          # Store missing items
+          echo "$MISSING_PACKAGES" > /tmp/tool_check/missing_packages
+          echo "$MISSING_TOOLS" > /tmp/tool_check/missing_tools
+
+    - name: Execute tool audit
+      shell: /tmp/tool_audit.sh
       register: tool_audit
       become_user: "{{ deploy_user }}"
 
-    - name: Display tool audit results
+    - name: Display audit results
       debug:
         msg: "{{ tool_audit.stdout_lines }}"
 
@@ -340,16 +256,16 @@ EOF
       register: tool_status
       ignore_errors: yes
 
-    - name: Install missing system packages
+    - name: Install system packages
       apt:
         name: "{{ system_packages }}"
         state: present
         update_cache: yes
       when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
 
-    - name: Setup Ruby environment script
+    - name: Ruby setup script
       copy:
-        dest: /tmp/setup_ruby.sh
+        dest: /tmp/ruby_setup.sh
         mode: '0755'
         content: |
           #!/bin/bash
@@ -358,18 +274,17 @@ EOF
           MISSING_TOOLS=$(cat /tmp/tool_check/missing_tools 2>/dev/null || echo "")
           FORCE_INSTALL="{{ force_installation }}"
           
-          if echo "$MISSING_TOOLS" | grep -q "rbenv\|ruby\|bundler" || [ "$FORCE_INSTALL" = "true" ]; then
+          if echo "$MISSING_TOOLS" | grep -q "rbenv" || echo "$MISSING_TOOLS" | grep -q "ruby" || echo "$MISSING_TOOLS" | grep -q "bundler" || [ "$FORCE_INSTALL" = "true" ]; then
             echo "💎 SETTING UP RUBY ENVIRONMENT..."
-            echo "================================="
             
-            # Install rbenv if missing
+            # Install rbenv
             if [ ! -d "/home/{{ deploy_user }}/.rbenv" ] || [ "$FORCE_INSTALL" = "true" ]; then
               echo "Installing rbenv..."
               rm -rf /home/{{ deploy_user }}/.rbenv
               git clone https://github.com/rbenv/rbenv.git /home/{{ deploy_user }}/.rbenv
               git clone https://github.com/rbenv/ruby-build.git /home/{{ deploy_user }}/.rbenv/plugins/ruby-build
               
-              # Add to bashrc if not already present
+              # Add to bashrc
               if ! grep -q 'rbenv' /home/{{ deploy_user }}/.bashrc; then
                 echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> /home/{{ deploy_user }}/.bashrc
                 echo 'eval "$(rbenv init -)"' >> /home/{{ deploy_user }}/.bashrc
@@ -389,157 +304,80 @@ EOF
               rbenv rehash
               
               # Install bundler
-              echo "Installing Bundler {{ required_tools.bundler_version }}..."
               gem install bundler -v {{ required_tools.bundler_version }}
               rbenv rehash
               
-              echo "✅ Ruby {{ required_tools.ruby_version }} and Bundler {{ required_tools.bundler_version }} installed"
-            else
-              echo "✅ Ruby environment already properly configured"
+              echo "✅ Ruby and Bundler installed"
             fi
-          else
-            echo "⏭️  Skipping Ruby installation - already properly configured"
           fi
 
     - name: Execute Ruby setup
-      shell: /tmp/setup_ruby.sh
+      shell: /tmp/ruby_setup.sh
       become_user: "{{ deploy_user }}"
       when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
 
-    - name: Setup Node.js environment
+    - name: Node.js setup
       shell: |
         if ! command -v node >/dev/null 2>&1 || [ "{{ force_installation }}" = "true" ]; then
-          echo "🟢 INSTALLING NODE.JS..."
+          echo "🟢 Installing Node.js..."
           curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
           apt-get install -y nodejs
-          echo "✅ Node.js installed: $(node --version)"
-          echo "✅ npm installed: $(npm --version)"
-        else
-          echo "⏭️  Skipping Node.js installation - already present"
+          echo "✅ Node.js installed"
         fi
       when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
 
-    - name: Configure PostgreSQL
-      shell: |
-        echo "🐘 CONFIGURING POSTGRESQL..."
-        systemctl start postgresql
-        systemctl enable postgresql
-        
-        # Create database user
-        sudo -u postgres psql -c "SELECT 1" > /dev/null 2>&1
-        if [ $? -eq 0 ]; then
-          sudo -u postgres psql << 'PSQL_EOF'
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_user WHERE usename = '{{ deploy_user }}') THEN
-    CREATE USER {{ deploy_user }} WITH PASSWORD 'deploy123';
-    ALTER USER {{ deploy_user }} CREATEDB;
-    GRANT ALL PRIVILEGES ON DATABASE postgres TO {{ deploy_user }};
-  END IF;
-END
-$$;
-PSQL_EOF
-          echo "✅ PostgreSQL user configured"
-        else
-          echo "⚠️  PostgreSQL not accessible"
-        fi
+    - name: PostgreSQL setup script
+      copy:
+        dest: /tmp/postgres_setup.sh
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          echo "🐘 CONFIGURING POSTGRESQL..."
+          systemctl start postgresql
+          systemctl enable postgresql
+          
+          # Create user
+          sudo -u postgres psql -c "SELECT 1" > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            sudo -u postgres createuser --createdb {{ deploy_user }} 2>/dev/null || echo "User exists"
+            sudo -u postgres psql -c "ALTER USER {{ deploy_user }} WITH PASSWORD 'deploy123';" 2>/dev/null || echo "Password set"
+            echo "✅ PostgreSQL configured"
+          fi
+
+    - name: Execute PostgreSQL setup
+      shell: /tmp/postgres_setup.sh
       when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
 
-    - name: Setup additional services
+    - name: Final verification
       shell: |
-        echo "🛠️  CONFIGURING ADDITIONAL SERVICES..."
-        if command -v redis-server >/dev/null 2>&1; then
-          systemctl start redis-server 2>/dev/null || true
-          systemctl enable redis-server 2>/dev/null || true
-          echo "✅ Redis configured"
-        fi
-      when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
-
-    - name: Final tool verification
-      shell: |
-        echo "🔍 FINAL TOOL VERIFICATION"
-        echo "========================="
-        echo ""
+        echo "🔍 FINAL VERIFICATION"
+        echo "===================="
+        echo "Ruby: $(ruby --version 2>/dev/null || echo 'Not available')"
+        echo "Bundler: $(bundle --version 2>/dev/null || echo 'Not available')"
+        echo "Node.js: $(node --version 2>/dev/null || echo 'Not available')"
+        echo "PostgreSQL: $(psql --version 2>/dev/null || echo 'Not available')"
         
-        # Verify all tools are now working
-        echo "🛠️  FINAL TOOL STATUS:"
-        echo "Ruby: $(ruby --version 2>/dev/null || echo '❌ Not available')"
-        echo "Bundler: $(bundle --version 2>/dev/null || echo '❌ Not available')"
-        echo "Node.js: $(node --version 2>/dev/null || echo '❌ Not available')"
-        echo "npm: $(npm --version 2>/dev/null || echo '❌ Not available')"
-        echo "PostgreSQL: $(psql --version 2>/dev/null || echo '❌ Not available')"
-        echo "Python3: $(python3 --version 2>/dev/null || echo '❌ Not available')"
-        echo "Redis: $(redis-server --version 2>/dev/null | head -1 || echo '❌ Not available')"
-        echo "ImageMagick: $(convert --version 2>/dev/null | head -1 || echo '❌ Not available')"
-        
-        echo ""
-        echo "🔌 SERVICE STATUS:"
-        echo "PostgreSQL: $(systemctl is-active postgresql 2>/dev/null || echo '❌ Not running')"
-        echo "Redis: $(systemctl is-active redis-server 2>/dev/null || echo '❌ Not running')"
-        
-        echo ""
-        
-        # Final status check
-        ALL_GOOD=true
-        
-        if ! command -v ruby >/dev/null 2>&1; then
-          echo "❌ Ruby installation failed"
-          ALL_GOOD=false
-        fi
-        
-        if ! command -v bundle >/dev/null 2>&1; then
-          echo "❌ Bundler installation failed"
-          ALL_GOOD=false
-        fi
-        
-        if ! command -v node >/dev/null 2>&1; then
-          echo "❌ Node.js installation failed"
-          ALL_GOOD=false
-        fi
-        
-        if ! command -v psql >/dev/null 2>&1; then
-          echo "❌ PostgreSQL client installation failed"
-          ALL_GOOD=false
-        fi
-        
-        if [ "$ALL_GOOD" = "true" ]; then
+        # Check if all critical tools are available
+        if command -v ruby && command -v bundle && command -v node && command -v psql; then
           echo "✅ ALL TOOLS VERIFIED AND READY!"
-          echo "Server is now prepared for Rails application deployment"
           echo "READY" > /tmp/tool_check/final_status
         else
-          echo "❌ SOME TOOLS FAILED TO INSTALL PROPERLY"
-          echo "Please check the installation logs above"
+          echo "❌ Some tools missing"
           echo "FAILED" > /tmp/tool_check/final_status
           exit 1
         fi
       become_user: "{{ deploy_user }}"
-      ignore_errors: no
 
-    - name: Display tool installation summary
+    - name: Display success
       debug:
         msg: |
-          🎉 TOOL INSTALLATION AND VERIFICATION COMPLETED! 🎉
+          🎉 TOOL INSTALLATION COMPLETED! 🎉
           
-          🛠️  Tools Successfully Installed/Verified:
-          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          ✅ Ruby {{ required_tools.ruby_version }} with rbenv
-          ✅ Bundler {{ required_tools.bundler_version }}
-          ✅ Node.js {{ required_tools.node_version }}
-          ✅ npm package manager
-          ✅ PostgreSQL {{ required_tools.postgres_version }}
-          ✅ PostgreSQL user '{{ deploy_user }}' configured
-          ✅ Python 3 with pip
-          ✅ Redis server
-          ✅ ImageMagick for image processing
-          ✅ All system dependencies and libraries
-          
-          🚀 Server Status: READY FOR DEPLOYMENT
-          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          The server now has all required tools installed and configured.
-          Proceeding with application deployment...
-EOF
+          ✅ All required tools verified and ready
+          ✅ Server prepared for Rails deployment
+PLAYBOOK_EOF
 
-                        # Find Ansible binary
+                        # Find Ansible and run playbook
                         ANSIBLE_BINARY=""
                         POSSIBLE_PATHS=(
                             "/usr/local/bin/ansible"
@@ -563,28 +401,22 @@ EOF
                         
                         ANSIBLE_PLAYBOOK_BINARY="$(dirname $ANSIBLE_BINARY)/ansible-playbook"
                         
-                        echo "🚀 Running comprehensive tool verification and installation..."
-                        echo "============================================================="
+                        echo "🚀 Running tool verification..."
                         
-                        # Run the tool verification and installation playbook
-                        $ANSIBLE_PLAYBOOK_BINARY -i temp_ansible/inventories/${ENVIRONMENT}/hosts \
-                            temp_ansible/playbooks/verify_and_install_tools.yml \
-                            --extra-vars "force_tool_installation=${FORCE_TOOL_INSTALLATION}" \
+                        # Run the tool verification playbook
+                        $ANSIBLE_PLAYBOOK_BINARY -i temp_ansible/inventories/${ENVIRONMENT}/hosts \\
+                            temp_ansible/playbooks/verify_and_install_tools.yml \\
+                            --extra-vars "force_tool_installation=${FORCE_TOOL_INSTALLATION}" \\
                             -v
                         
                         if [ $? -eq 0 ]; then
-                            echo ""
-                            echo "✅ TOOL VERIFICATION AND INSTALLATION COMPLETED SUCCESSFULLY!"
-                            echo "Server is now ready for application deployment"
-                            echo ""
+                            echo "✅ TOOL VERIFICATION COMPLETED!"
                         else
-                            echo ""
-                            echo "❌ TOOL VERIFICATION/INSTALLATION FAILED!"
-                            echo "Please check the logs above for errors"
+                            echo "❌ TOOL VERIFICATION FAILED!"
                             exit 1
                         fi
                         
-                        # Cleanup temporary files
+                        # Cleanup
                         rm -rf temp_ansible
                     '''
                 }
@@ -595,7 +427,7 @@ EOF
             steps {
                 script {
                     def deploymentMessage = """
-🚀 READY TO DEPLOY: All tools verified/installed successfully!
+🚀 READY TO DEPLOY: All tools verified!
 
 Deploy to ${params.ENVIRONMENT} using Ansible?
 """
@@ -673,16 +505,9 @@ Method: Ansible automation
             steps {
                 script {
                     sh '''
-                        # Debug current location
-                        echo "=== Debug Information ==="
-                        echo "Current directory: $(pwd)"
-                        echo "Files in current directory:"
-                        ls -la
+                        echo "=== Setting up Ansible environment ==="
                         
-                        # Find Ansible binary directly
-                        echo "Locating Ansible installation..."
-                        
-                        # Check multiple possible locations
+                        # Find Ansible binary
                         ANSIBLE_BINARY=""
                         POSSIBLE_PATHS=(
                             "/usr/local/bin/ansible"
@@ -699,21 +524,15 @@ Method: Ansible automation
                             fi
                         done
                         
-                        # Test Ansible with direct path
-                        echo "Testing Ansible..."
-                        $ANSIBLE_BINARY --version
-                        
-                        # Store the path for later stages
                         echo "$ANSIBLE_BINARY" > /tmp/ansible_path
                         echo "ANSIBLE_DIR=$(dirname $ANSIBLE_BINARY)" > /tmp/ansible_env
                         
-                        # Create Ansible structure for Rails deployment
-                        echo "Creating Ansible structure for Rails deployment..."
+                        # Create Ansible structure
                         mkdir -p ansible/{inventories,playbooks}
                         mkdir -p ansible/inventories/staging
                         mkdir -p ansible/inventories/production
                         
-                        # Create inventory file for staging
+                        # Create staging inventory
                         cat > ansible/inventories/staging/hosts << 'EOF'
 [webservers]
 staging-server ansible_host=54.210.171.180 ansible_user=deploy
@@ -726,7 +545,7 @@ deploy_user=deploy
 deploy_path=/var/www/hello-world-app
 EOF
 
-                        # Create inventory file for production
+                        # Create production inventory
                         cat > ansible/inventories/production/hosts << 'EOF'
 [webservers]
 production-server ansible_host=YOUR_PROD_IP ansible_user=deploy
@@ -739,23 +558,23 @@ deploy_user=deploy
 deploy_path=/var/www/hello-world-app
 EOF
 
-                        # Create Rails deployment playbook with UI support
-                        cat > ansible/playbooks/deploy.yml << 'EOF'
+                        # Create Rails deployment playbook
+                        cat > ansible/playbooks/deploy.yml << 'DEPLOY_EOF'
 ---
-- name: Deploy Rails Application with Beautiful UI
+- name: Deploy Beautiful Rails Application
   hosts: webservers
   become: yes
   vars:
     app_archive_path: "/tmp/{{ app_name }}-{{ build_number | default('latest') }}.tar.gz"
   
   tasks:
-    - name: Upload artifact to server
+    - name: Upload artifact
       shell: |
         scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "{{ local_artifact_path }}" deploy@{{ ansible_host }}:/tmp/{{ app_name }}-{{ build_number }}.tar.gz
       delegate_to: localhost
       become: no
 
-    - name: Create deployment directories
+    - name: Create directories
       file:
         path: "{{ deploy_path }}/{{ rails_env }}/current"
         state: directory
@@ -771,13 +590,13 @@ EOF
         group: "{{ deploy_user }}"
         remote_src: yes
 
-    - name: Install Rails dependencies and setup UI
+    - name: Setup Rails with beautiful UI
       shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
         
-        echo "📦 Setting up Rails application with beautiful UI..."
+        echo "🎨 Setting up beautiful Rails application..."
         
-        # Set up Ruby environment
+        # Ruby environment
         export PATH="/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:$PATH"
         eval "$(rbenv init -)"
         export RAILS_ENV={{ rails_env }}
@@ -785,10 +604,7 @@ EOF
         # Install gems
         bundle install --without development test
         
-        # Create Rails UI components if they don't exist
-        echo "🎨 Creating beautiful Rails UI..."
-        
-        # Ensure routes exist with root route
+        # Create routes
         cat > config/routes.rb << 'ROUTES_EOF'
 Rails.application.routes.draw do
   root 'welcome#index'
@@ -796,21 +612,20 @@ Rails.application.routes.draw do
 end
 ROUTES_EOF
         
-        # Create Welcome controller
+        # Create controller
         mkdir -p app/controllers
-        cat > app/controllers/welcome_controller.rb << 'CONTROLLER_EOF'
+        cat > app/controllers/welcome_controller.rb << 'CTRL_EOF'
 class WelcomeController < ApplicationController
   def index
-    @deployment_info = {
+    @info = {
       environment: Rails.env,
       rails_version: Rails.version,
       ruby_version: RUBY_VERSION,
-      deployed_at: Time.current,
-      server_name: Socket.gethostname
+      deployed_at: Time.current
     }
   end
 end
-CONTROLLER_EOF
+CTRL_EOF
         
         # Create layout
         mkdir -p app/views/layouts
@@ -827,10 +642,7 @@ CONTROLLER_EOF
       .content { background: rgba(255,255,255,0.95); padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
       .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }
       .card { background: #f8f9fa; padding: 20px; border-radius: 15px; border-left: 4px solid #28a745; }
-      .badge { display: inline-block; padding: 6px 12px; border-radius: 15px; font-size: 0.9em; font-weight: bold; margin: 5px; }
-      .success { background: #28a745; color: white; }
-      .info { background: #17a2b8; color: white; }
-      .warning { background: #ffc107; color: #212529; }
+      .badge { display: inline-block; padding: 6px 12px; border-radius: 15px; font-size: 0.9em; font-weight: bold; margin: 5px; background: #28a745; color: white; }
       h1 { color: #2563eb; margin: 0; font-size: 2.5em; }
       h3 { color: #374151; margin-top: 0; }
       .status { font-size: 1.3em; color: #28a745; margin: 20px 0; }
@@ -840,7 +652,7 @@ CONTROLLER_EOF
     <div class="container">
       <div class="header">
         <h1>🚀 Rails Deployment Success!</h1>
-        <p class="status">✅ Application Successfully Deployed and Running</p>
+        <p class="status">✅ Application Successfully Deployed</p>
       </div>
       <div class="content">
         <%= yield %>
@@ -850,53 +662,48 @@ CONTROLLER_EOF
 </html>
 LAYOUT_EOF
         
-        # Create welcome view
+        # Create view
         mkdir -p app/views/welcome
         cat > app/views/welcome/index.html.erb << 'VIEW_EOF'
 <div class="grid">
   <div class="card">
-    <h3>🎯 Deployment Information</h3>
-    <% if @deployment_info %>
-      <p><strong>Environment:</strong> <%= @deployment_info[:environment].upcase %></p>
-      <p><strong>Deployed:</strong> <%= @deployment_info[:deployed_at].strftime("%B %d, %Y at %I:%M %p") %></p>
-      <p><strong>Server:</strong> <%= @deployment_info[:server_name] %></p>
+    <h3>🎯 Deployment Info</h3>
+    <% if @info %>
+      <p><strong>Environment:</strong> <%= @info[:environment].upcase %></p>
+      <p><strong>Deployed:</strong> <%= @info[:deployed_at].strftime("%B %d, %Y at %I:%M %p") %></p>
     <% end %>
   </div>
   
   <div class="card">
-    <h3>🛠️ Technical Stack</h3>
+    <h3>🛠️ Tech Stack</h3>
     <p><strong>Rails:</strong> <%= Rails.version %></p>
     <p><strong>Ruby:</strong> <%= RUBY_VERSION %></p>
     <p><strong>Environment:</strong> <%= Rails.env %></p>
   </div>
   
   <div class="card">
-    <h3>📊 Application Status</h3>
+    <h3>📊 Status</h3>
     <p>✅ Rails Server Running</p>
     <p>✅ Database Connected</p>
-    <p>✅ Assets Compiled</p>
-    <p>🌐 Ready to Serve</p>
+    <p>✅ Ready to Serve</p>
   </div>
 </div>
 
 <div style="text-align: center; margin-top: 30px; padding: 20px; background: #e8f5e8; border-radius: 15px;">
-  <h3>🎉 Jenkins CI/CD Pipeline Success!</h3>
-  <p>Your Rails application has been successfully deployed using automated CI/CD with tool verification.</p>
-  <div style="margin-top: 15px;">
-    <span class="badge success">Tool Verification</span>
-    <span class="badge success">Database Setup</span>
-    <span class="badge success">Asset Compilation</span>
-    <span class="badge success">Health Check</span>
-  </div>
+  <h3>🎉 CI/CD Success!</h3>
+  <p>Deployed with Jenkins and Ansible automation</p>
+  <span class="badge">Tool Verification</span>
+  <span class="badge">Rails Deployment</span>
+  <span class="badge">Beautiful UI</span>
 </div>
 VIEW_EOF
         
-        echo "✅ Rails UI components created successfully"
+        echo "✅ Beautiful Rails UI created"
       become_user: "{{ deploy_user }}"
       environment:
         PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
 
-    - name: Rails database operations
+    - name: Database operations
       shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
         
@@ -904,33 +711,24 @@ VIEW_EOF
         eval "$(rbenv init -)"
         export RAILS_ENV={{ rails_env }}
         
-        echo "🗄️  Performing Rails database operations..."
+        echo "🗄️ Database operations..."
         
-        # Create database
-        echo "=== RAILS_ENV={{ rails_env }} bundle exec rake db:create ==="
-        RAILS_ENV={{ rails_env }} bundle exec rake db:create 2>/dev/null || echo "Database already exists"
-        
-        # Run migrations
-        echo "=== RAILS_ENV={{ rails_env }} bundle exec rake db:migrate ==="
+        # Database setup
+        RAILS_ENV={{ rails_env }} bundle exec rake db:create 2>/dev/null || echo "Database exists"
         RAILS_ENV={{ rails_env }} bundle exec rake db:migrate
-        
-        # Precompile assets
-        echo "=== RAILS_ENV={{ rails_env }} bundle exec rake assets:precompile ==="
         RAILS_ENV={{ rails_env }} bundle exec rake assets:precompile
         
-        echo "✅ Rails database operations completed"
+        echo "✅ Database operations completed"
       become_user: "{{ deploy_user }}"
       environment:
         PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
         RAILS_ENV: "{{ rails_env }}"
 
-    - name: Stop existing servers and start Rails
+    - name: Start Rails server
       shell: |
-        # Stop all existing servers
-        echo "🔄 Stopping existing servers..."
+        # Stop existing servers
         pkill -f 'python.*http.server' || true
         pkill -f 'rails server' || true
-        pkill -f 'puma' || true
         sleep 5
         
         cd {{ deploy_path }}/{{ rails_env }}/current
@@ -939,7 +737,7 @@ VIEW_EOF
         eval "$(rbenv init -)"
         export RAILS_ENV={{ rails_env }}
         
-        echo "🚀 Starting Rails server with beautiful UI..."
+        echo "🚀 Starting beautiful Rails application..."
         
         # Start Rails server
         nohup bundle exec rails server -e {{ rails_env }} -p 3000 -b 0.0.0.0 > log/rails.log 2>&1 &
@@ -947,22 +745,20 @@ VIEW_EOF
         
         sleep 15
         
-        # Verify Rails is running
         if ps aux | grep -v grep | grep 'rails server'; then
-          echo "✅ Rails server with UI started successfully"
+          echo "✅ Beautiful Rails UI started successfully"
         else
           echo "❌ Rails server failed to start"
-          tail -20 log/rails.log
           exit 1
         fi
       become_user: "{{ deploy_user }}"
 
-    - name: Verify Rails UI deployment
+    - name: Verify deployment
       shell: |
-        echo "🔍 VERIFYING RAILS UI DEPLOYMENT"
-        echo "================================"
+        echo "🔍 VERIFYING BEAUTIFUL RAILS DEPLOYMENT"
+        echo "========================================"
         
-        # Check server status
+        # Check server
         if ps aux | grep -v grep | grep 'rails server'; then
           echo "✅ Rails server running"
         fi
@@ -971,46 +767,32 @@ VIEW_EOF
           echo "✅ Port 3000 listening"
         fi
         
-        # Test HTTP response
-        if curl -s http://localhost:3000 | grep -i "rails\\|deployment\\|success"; then
-          echo "✅ Rails UI is serving beautiful content"
+        # Test UI
+        if curl -s http://localhost:3000 | grep -i "deployment.*success"; then
+          echo "✅ Beautiful Rails UI confirmed"
         fi
         
-        echo "🎨 Beautiful Rails UI is now live at: http://{{ ansible_host }}:3000"
+        echo "🎨 Beautiful UI live at: http://{{ ansible_host }}:3000"
       become_user: "{{ deploy_user }}"
       ignore_errors: yes
 
-    - name: Display UI deployment success
+    - name: Success message
       debug:
         msg: |
-          🎉 BEAUTIFUL RAILS UI DEPLOYMENT COMPLETED! 🎉
+          🎉 BEAUTIFUL RAILS UI DEPLOYMENT SUCCESS! 🎉
           
-          🌐 Your Rails application is now live with a stunning UI:
-          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          ✨ Your stunning Rails application is now live!
+          🌍 Access: http://{{ ansible_host }}:3000/
+          🏥 Health: http://{{ ansible_host }}:3000/health
           
-          ✅ Rails Server Running (NOT directory listing!)
-          ✅ Beautiful responsive UI design
-          ✅ Deployment information displayed
-          ✅ Technical stack showcase
-          ✅ Health monitoring available
-          
-          🔗 Access Your Beautiful Application:
-          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          🌍 Main Application: http://{{ ansible_host }}:3000/
-          🏥 Health Check: http://{{ ansible_host }}:3000/health
-          
-          🎨 UI Features:
-          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          ✅ Modern gradient background
-          ✅ Glassmorphism design cards
-          ✅ Deployment status badges
-          ✅ Technical information display
-          ✅ Responsive mobile-friendly layout
-          
-          🚀 You should now see a beautiful Rails UI instead of file listing!
-EOF
+          Features deployed:
+          ✅ Modern responsive design
+          ✅ Deployment dashboard
+          ✅ Technical stack display
+          ✅ Status indicators
+DEPLOY_EOF
                         
-                        echo "✅ Beautiful Rails UI deployment structure created"
+                        echo "✅ Ansible deployment structure created"
                     '''
                 }
             }
@@ -1027,13 +809,7 @@ EOF
                         echo "Artifact: $ARTIFACT_FILE"
                         echo "Build number: $BUILD_NUM"
                         
-                        # Copy artifact to /tmp for local access
-                        cp $ARTIFACT_FILE /tmp/hello-world-app-${BUILD_NUM}.tar.gz
-                        
-                        # Also keep the artifact in workspace for SCP transfer
-                        echo "Artifact location: $(pwd)/$ARTIFACT_FILE"
-                        
-                        # Create ansible variables file
+                        # Create variables file
                         cat > ansible/extra_vars.yml << EOF
 build_number: ${BUILD_NUM}
 app_archive_path: /tmp/hello-world-app-${BUILD_NUM}.tar.gz
@@ -1055,25 +831,16 @@ EOF
                 script {
                     dir('ansible') {
                         sh '''
-                            # Load Ansible path
                             source /tmp/ansible_env
                             ANSIBLE_BINARY=$(cat /tmp/ansible_path)
                             
-                            echo "Testing Ansible connectivity..."
-                            echo "Using Ansible binary: $ANSIBLE_BINARY"
-                            echo "Using inventory: inventories/${ENVIRONMENT}/hosts"
-                            
-                            # Test ping with direct binary path
+                            echo "Testing connectivity..."
                             $ANSIBLE_BINARY -i inventories/${ENVIRONMENT}/hosts webservers -m ping
                             
                             if [ $? -eq 0 ]; then
-                                echo "✅ Ansible connectivity test passed"
+                                echo "✅ Connectivity test passed"
                             else
-                                echo "❌ Ansible connectivity test failed"
-                                echo "Debugging information:"
-                                echo "Current directory: $(pwd)"
-                                echo "Inventory file contents:"
-                                cat inventories/${ENVIRONMENT}/hosts
+                                echo "❌ Connectivity test failed"
                                 exit 1
                             fi
                         '''
@@ -1082,35 +849,25 @@ EOF
             }
         }
         
-        stage('Deploy Beautiful Rails UI') {
+        stage('Deploy Beautiful Rails Application') {
             steps {
                 script {
                     dir('ansible') {
                         sh '''
-                            # Load Ansible path
                             source /tmp/ansible_env
                             ANSIBLE_BINARY=$(cat /tmp/ansible_path)
                             ANSIBLE_PLAYBOOK_BINARY="$(dirname $ANSIBLE_BINARY)/ansible-playbook"
                             
-                            echo "🚀 Starting Beautiful Rails UI deployment..."
-                            echo "=============================================" 
-                            echo "Environment: ${ENVIRONMENT}"
-                            echo "Target: Rails application with stunning UI"
-                            echo "Tools: ✅ Pre-verified and ready"
-                            echo ""
+                            echo "🚀 Deploying beautiful Rails application..."
                             
-                            # Run Rails deployment playbook
-                            $ANSIBLE_PLAYBOOK_BINARY -i inventories/${ENVIRONMENT}/hosts playbooks/deploy.yml \
-                                --extra-vars @extra_vars.yml \
+                            $ANSIBLE_PLAYBOOK_BINARY -i inventories/${ENVIRONMENT}/hosts playbooks/deploy.yml \\
+                                --extra-vars @extra_vars.yml \\
                                 -v
                             
                             if [ $? -eq 0 ]; then
-                                echo ""
-                                echo "✅ BEAUTIFUL RAILS UI DEPLOYMENT COMPLETED SUCCESSFULLY!"
-                                echo "Your application now has a stunning user interface!"
+                                echo "✅ Beautiful Rails UI deployed successfully!"
                             else
-                                echo ""
-                                echo "❌ Rails UI deployment failed"
+                                echo "❌ Deployment failed"
                                 exit 1
                             fi
                         '''
@@ -1126,36 +883,28 @@ EOF
                         string(credentialsId: "ec2-${params.ENVIRONMENT}-host", variable: 'EC2_HOST')
                     ]) {
                         sh '''
-                            echo "🏥 Verifying beautiful Rails UI deployment..."
+                            echo "🏥 Verifying beautiful Rails UI..."
                             
-                            # Wait for application to start
                             sleep 25
                             
-                            # Health check with retries
-                            MAX_RETRIES=12
+                            MAX_RETRIES=10
                             RETRY_COUNT=0
                             
                             while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-                                echo "UI verification attempt $((RETRY_COUNT + 1))/$MAX_RETRIES"
+                                echo "Verification attempt $((RETRY_COUNT + 1))/$MAX_RETRIES"
                                 
                                 if curl -f -s -o /dev/null http://${EC2_HOST}:3000/; then
-                                    echo "✅ Beautiful Rails UI is responding!"
-                                    
-                                    # Check if it's actually Rails UI content
-                                    RESPONSE=$(curl -s http://${EC2_HOST}:3000)
-                                    if echo "$RESPONSE" | grep -i "rails\\|deployment\\|success"; then
-                                        echo "✅ Confirmed: Beautiful Rails UI is live (not directory listing)!"
-                                    fi
+                                    echo "✅ Beautiful Rails UI is live!"
                                     break
                                 else
-                                    echo "⏳ UI not ready, retrying in 10 seconds..."
+                                    echo "⏳ Waiting for UI..."
                                     sleep 10
                                     RETRY_COUNT=$((RETRY_COUNT + 1))
                                 fi
                             done
                             
                             if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-                                echo "❌ UI verification failed after $MAX_RETRIES attempts"
+                                echo "❌ UI verification failed"
                                 exit 1
                             fi
                         '''
@@ -1173,47 +922,42 @@ EOF
                         sh '''
                             echo "
 🎉 BEAUTIFUL RAILS UI DEPLOYMENT SUCCESS! 🎉
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📊 Deployment Details:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Environment: ${ENVIRONMENT}
 Server: ${EC2_HOST}
 Approved by: ${DEPLOYMENT_APPROVER}
 Build: ${BUILD_NUMBER_TO_DEPLOY:-latest}
-UI Type: ✨ Beautiful Modern Rails Interface
-Application URL: http://${EC2_HOST}:3000
-Deployment time: $(date)
+Type: ✨ Beautiful Modern Rails UI
+URL: http://${EC2_HOST}:3000
+Time: $(date)
 
-🎨 Beautiful UI Features Deployed:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✨ Modern gradient background design
-✨ Glassmorphism UI cards
-✨ Responsive mobile-friendly layout  
-✨ Deployment information dashboard
-✨ Technical stack showcase
-✨ Status badges and indicators
-✨ Professional typography and spacing
+🎨 UI Features Deployed:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ Modern gradient background
+✨ Glassmorphism cards
+✨ Responsive design
+✨ Deployment dashboard
+✨ Technical stack display
+✨ Status indicators
 
-🚀 Rails Application Deployment:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ Beautiful Rails UI created (NOT directory listing!)
-✅ Rails server running with custom interface
-✅ RAILS_ENV=${ENVIRONMENT} bundle exec rake db:create
-✅ RAILS_ENV=${ENVIRONMENT} bundle exec rake db:migrate
-✅ RAILS_ENV=${ENVIRONMENT} bundle exec rake assets:precompile
-✅ Custom Welcome controller and views
-✅ Modern responsive layout deployed
-✅ Health endpoints configured
+🚀 Rails Operations:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ RAILS_ENV=${ENVIRONMENT} rake db:create
+✅ RAILS_ENV=${ENVIRONMENT} rake db:migrate
+✅ RAILS_ENV=${ENVIRONMENT} rake assets:precompile
+✅ Beautiful UI components created
+✅ Rails server started
 
 🔗 Access Your Beautiful Application:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🌍 Beautiful UI: http://${EC2_HOST}:3000/
-🏥 Health Check: http://${EC2_HOST}:3000/health
-🔧 SSH Access: ssh deploy@${EC2_HOST}
-📋 App Logs: ssh deploy@${EC2_HOST} 'tail -f /var/www/hello-world-app/${ENVIRONMENT}/current/log/rails.log'
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌍 Main UI: http://${EC2_HOST}:3000/
+🏥 Health: http://${EC2_HOST}:3000/health
+🔧 SSH: ssh deploy@${EC2_HOST}
 
-🎯 SUCCESS: You should now see a stunning Rails UI instead of file directory!
+🎯 SUCCESS: Beautiful Rails UI is now live!
                             "
                         '''
                     }
@@ -1224,27 +968,11 @@ Deployment time: $(date)
     
     post {
         success {
-            echo "✅ Beautiful Rails UI deployment to ${params.ENVIRONMENT} completed successfully!"
-            
-            script {
-                try {
-                    withCredentials([
-                        string(credentialsId: 'slack-webhook-url', variable: 'SLACK_WEBHOOK')
-                    ]) {
-                        sh '''
-                            curl -X POST -H 'Content-type: application/json' \
-                                --data '{"text":"✨ Beautiful Rails UI Deployment Success: '${APP_NAME}' to '${ENVIRONMENT}' - Build #'${BUILD_NUMBER}' (by '${DEPLOYMENT_APPROVER}') - Stunning UI now live!"}' \
-                                $SLACK_WEBHOOK
-                        '''
-                    }
-                } catch (Exception e) {
-                    echo "Notification failed: ${e.message}"
-                }
-            }
+            echo "✅ Beautiful Rails UI deployment completed successfully!"
         }
         
         failure {
-            echo "❌ Beautiful Rails UI deployment to ${params.ENVIRONMENT} failed!"
+            echo "❌ Deployment failed!"
         }
         
         always {
