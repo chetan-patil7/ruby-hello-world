@@ -173,13 +173,9 @@ EOF
     app_archive_path: "/tmp/{{ app_name }}-{{ build_number | default('latest') }}.tar.gz"
   
   tasks:
-    - name: Transfer application artifact to server
-      copy:
-        src: "{{ local_artifact_path }}"
-        dest: "{{ app_archive_path }}"
-        owner: "{{ deploy_user }}"
-        group: "{{ deploy_user }}"
-        mode: '0644'
+    - name: Upload artifact to server
+      shell: |
+        scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "{{ local_artifact_path }}" deploy@{{ ansible_host }}:/tmp/{{ app_name }}-{{ build_number }}.tar.gz
       delegate_to: localhost
       become: no
 
@@ -190,16 +186,6 @@ EOF
         owner: "{{ deploy_user }}"
         group: "{{ deploy_user }}"
         mode: '0755'
-
-    - name: Verify artifact exists on server
-      stat:
-        path: "{{ app_archive_path }}"
-      register: artifact_check
-
-    - name: Fail if artifact not found
-      fail:
-        msg: "Artifact not found at {{ app_archive_path }}"
-      when: not artifact_check.stat.exists
 
     - name: Extract application
       unarchive:
@@ -220,77 +206,37 @@ EOF
     - name: Start server
       shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
-        nohup bash -c 'python3 -m http.server 3000' > /tmp/server.log 2>&1 &
-        echo $! > /tmp/server.pid
+        nohup python3 -m http.server 3000 > /tmp/server.log 2>&1 &
         sleep 5
-        echo "Server started with PID: $(cat /tmp/server.pid 2>/dev/null || echo 'unknown')"
       become_user: "{{ deploy_user }}"
       ignore_errors: yes
 
-    - name: Wait for server to initialize
+    - name: Wait for server
       pause:
         seconds: 10
 
-    - name: Verify server is running
+    - name: Verify deployment
       shell: |
-        echo "=== Server Status Check ==="
-        if ps aux | grep -v grep | grep 'python.*http.server' > /dev/null; then
-          echo "✅ Python HTTP server is running"
-          PID=$(cat /tmp/server.pid 2>/dev/null || echo 'unknown')
-          echo "Server PID: $PID"
+        if ps aux | grep -v grep | grep 'python.*http.server'; then
+          echo "✅ Server is running"
         else
-          echo "❌ Server not found in process list"
+          echo "❌ Server not running"
         fi
         
-        echo "=== Port Check ==="
-        if netstat -tlnp 2>/dev/null | grep :3000; then
-          echo "✅ Port 3000 is listening"
+        if netstat -tlnp | grep :3000; then
+          echo "✅ Port 3000 listening"
         else
           echo "❌ Port 3000 not listening"
         fi
-        
-        echo "=== Log File Check ==="
-        if [ -f /tmp/server.log ]; then
-          echo "Server log (last 10 lines):"
-          tail -10 /tmp/server.log
-        else
-          echo "No server log file found"
-        fi
-        
-        echo "=== Process List ==="
-        ps aux | grep -E "(python|rails)" | grep -v grep || echo "No Python/Rails processes found"
       become_user: "{{ deploy_user }}"
       ignore_errors: yes
 
-    - name: Test server response
-      uri:
-        url: "http://{{ ansible_host }}:3000"
-        method: GET
-        status_code: [200, 301, 302, 404]
-        timeout: 10
-      register: server_response
-      ignore_errors: yes
-      delegate_to: localhost
-
-    - name: Display server test result
-      debug:
-        msg: |
-          Server Response: {{ 'SUCCESS - Server is responding' if server_response is succeeded else 'Server not responding yet' }}
-          Status Code: {{ server_response.status | default('No response') }}
-
-    - name: Cleanup artifact file
-      file:
-        path: "{{ app_archive_path }}"
-        state: absent
-
-    - name: Display deployment success
+    - name: Display success
       debug:
         msg: |
           🎉 Deployment completed!
-          Server: {{ ansible_host }}:3000
-          Application: {{ deploy_path }}/{{ rails_env }}/current
-          Check manually: ssh {{ deploy_user }}@{{ ansible_host }} "ps aux | grep python"
-          Browse to: http://{{ ansible_host }}:3000
+          URL: http://{{ ansible_host }}:3000
+          SSH: ssh deploy@{{ ansible_host }}
 EOF
                             echo "✅ Created minimal ansible structure"
                         fi
