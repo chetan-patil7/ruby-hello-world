@@ -658,15 +658,13 @@ EOF
         
         if ! grep -q "^{{ rails_env }}:" config/database.yml; then
           echo "Adding {{ rails_env }} database configuration..."
-          cat >> config/database.yml << EOF
-
-{{ rails_env }}:
-  <<: *default
-  database: hello_world_app_{{ rails_env }}
-  username: {{ deploy_user }}
-  password: deploy123
-  host: localhost
-EOF
+          echo "" >> config/database.yml
+          echo "{{ rails_env }}:" >> config/database.yml
+          echo "  <<: *default" >> config/database.yml
+          echo "  database: hello_world_app_{{ rails_env }}" >> config/database.yml
+          echo "  username: {{ deploy_user }}" >> config/database.yml
+          echo "  password: deploy123" >> config/database.yml
+          echo "  host: localhost" >> config/database.yml
         fi
         
         echo "Rails environment configured"
