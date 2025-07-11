@@ -592,7 +592,7 @@ EOF
   become: yes
   vars:
     app_archive_path: "/tmp/{{ app_name }}-{{ build_number | default('latest') }}.tar.gz"
-  
+
   tasks:
     - name: Upload artifact
       shell: |
@@ -620,14 +620,13 @@ EOF
       shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
         
-        # Set Ruby environment
         export PATH="/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:$PATH"
         eval "$(rbenv init -)"
         
-        echo "💎 Installing Ruby dependencies..."
+        echo "Installing Ruby dependencies..."
         bundle install --without development test
         
-        echo "✅ Ruby dependencies installed"
+        echo "Ruby dependencies installed"
       become_user: "{{ deploy_user }}"
       environment:
         PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
@@ -636,25 +635,20 @@ EOF
       shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
         
-        # Set Ruby environment
         export PATH="/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:$PATH"
         eval "$(rbenv init -)"
         export RAILS_ENV={{ rails_env }}
         
-        echo "🗄️ Setting up database..."
+        echo "Setting up database..."
         
-        # Create database if it doesn't exist
         RAILS_ENV={{ rails_env }} bundle exec rake db:create 2>/dev/null || echo "Database already exists"
-        
-        # Run migrations
         RAILS_ENV={{ rails_env }} bundle exec rake db:migrate
         
-        # Precompile assets if assets directory exists
         if [ -d "app/assets" ]; then
           RAILS_ENV={{ rails_env }} bundle exec rake assets:precompile
         fi
         
-        echo "✅ Database operations completed"
+        echo "Database operations completed"
       become_user: "{{ deploy_user }}"
       environment:
         PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
@@ -662,58 +656,46 @@ EOF
 
     - name: Stop existing servers
       shell: |
-        echo "🛑 Stopping existing servers..."
+        echo "Stopping existing servers..."
         
-        # Stop any existing Python servers
         pkill -f 'python.*http.server' || true
-        
-        # Stop any existing Rails servers
         pkill -f 'rails server' || true
         
-        # Wait for processes to terminate
         sleep 5
         
-        echo "✅ Existing servers stopped"
+        echo "Existing servers stopped"
       become_user: "{{ deploy_user }}"
 
     - name: Start Rails Server
       shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
         
-        # Set Ruby environment
         export PATH="/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:$PATH"
         eval "$(rbenv init -)"
         
-        # Set environment variables based on your requirements
         export RAILS_ENV={{ rails_env }}
         export SECRET_KEY_BASE=$(bundle exec rails secret)
         
-        echo "🚀 Starting Rails server..."
+        echo "Starting Rails server..."
         echo "Environment: $RAILS_ENV"
-        echo "Secret key base generated: ${SECRET_KEY_BASE:0:20}..."
         
-        # Create logs directory if it doesn't exist
-        mkdir -p log
+        mkdir -p log tmp/pids
         
-        # Start Rails server in background using your exact commands
         nohup bundle exec rails server -e {{ rails_env }} -p 3000 -b 0.0.0.0 > log/rails.log 2>&1 &
         
-        # Save the process ID
         echo $! > tmp/pids/server.pid
         
-        echo "✅ Rails server started in background"
-        echo "📋 Process ID: $(cat tmp/pids/server.pid)"
+        echo "Rails server started in background"
+        echo "Process ID: $(cat tmp/pids/server.pid)"
         
-        # Wait a moment for the server to start
         sleep 15
         
-        # Verify the server is running
         if ps aux | grep -v grep | grep 'rails server'; then
-          echo "✅ Rails server is running successfully"
-          echo "🌍 Server accessible at: http://{{ ansible_host }}:3000"
+          echo "Rails server is running successfully"
+          echo "Server accessible at: http://{{ ansible_host }}:3000"
         else
-          echo "❌ Rails server failed to start"
-          echo "📝 Checking logs:"
+          echo "Rails server failed to start"
+          echo "Checking logs:"
           tail -20 log/rails.log
           exit 1
         fi
@@ -725,62 +707,58 @@ EOF
       shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
         
-        echo "🔍 VERIFYING RAILS DEPLOYMENT"
-        echo "=============================="
+        echo "VERIFYING RAILS DEPLOYMENT"
+        echo "=========================="
         
-        # Check if Rails server process is running
         if ps aux | grep -v grep | grep 'rails server'; then
-          echo "✅ Rails server process running"
+          echo "Rails server process running"
         else
-          echo "❌ Rails server process not found"
+          echo "Rails server process not found"
         fi
         
-        # Check if port 3000 is listening
         if netstat -tlnp | grep :3000; then
-          echo "✅ Port 3000 is listening"
+          echo "Port 3000 is listening"
         else
-          echo "❌ Port 3000 not listening"
+          echo "Port 3000 not listening"
         fi
         
-        # Test HTTP connection
         sleep 5
         HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 || echo "000")
         if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "500" ]; then
-          echo "✅ Rails application responding to HTTP requests (HTTP $HTTP_CODE)"
+          echo "Rails application responding to HTTP requests (HTTP $HTTP_CODE)"
         else
-          echo "⚠️  Rails application might still be starting up (HTTP $HTTP_CODE)"
+          echo "Rails application might still be starting up (HTTP $HTTP_CODE)"
         fi
         
         echo ""
-        echo "📊 Server Status:"
+        echo "Server Status:"
         echo "Environment: {{ rails_env }}"
         echo "Application Path: {{ deploy_path }}/{{ rails_env }}/current"
         echo "Access URL: http://{{ ansible_host }}:3000"
         echo "Log File: {{ deploy_path }}/{{ rails_env }}/current/log/rails.log"
-        
       become_user: "{{ deploy_user }}"
       ignore_errors: yes
 
     - name: Display deployment success message
       debug:
         msg: |
-          🎉 RAILS APPLICATION DEPLOYMENT SUCCESS! 🎉
+          RAILS APPLICATION DEPLOYMENT SUCCESS!
           
-          🚀 Your Rails application is now running!
-          🌍 Access: http://{{ ansible_host }}:3000/
-          📝 Logs: {{ deploy_path }}/{{ rails_env }}/current/log/rails.log
+          Your Rails application is now running!
+          Access: http://{{ ansible_host }}:3000/
+          Logs: {{ deploy_path }}/{{ rails_env }}/current/log/rails.log
           
           Server Details:
-          ✅ Environment: {{ rails_env }}
-          ✅ Ruby/Rails server running on port 3000
-          ✅ Database migrations completed
-          ✅ Assets precompiled (if applicable)
-          ✅ Secret key base generated
+          Environment: {{ rails_env }}
+          Ruby/Rails server running on port 3000
+          Database migrations completed
+          Assets precompiled (if applicable)
+          Secret key base generated
           
           Commands used:
-          🔧 export RAILS_ENV={{ rails_env }}
-          🔧 export SECRET_KEY_BASE=$(bundle exec rails secret)
-          🔧 bundle exec rails server -e {{ rails_env }} -p 3000 -b 0.0.0.0
+          export RAILS_ENV={{ rails_env }}
+          export SECRET_KEY_BASE=$(bundle exec rails secret)
+          bundle exec rails server -e {{ rails_env }} -p 3000 -b 0.0.0.0
 DEPLOY_EOF
                         
                         echo "✅ Ansible Rails deployment structure created"
