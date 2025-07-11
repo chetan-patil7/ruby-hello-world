@@ -654,6 +654,21 @@ EOF
           echo "  config.eager_load = false" >> config/environments/{{ rails_env }}.rb
         fi
         
+        echo "Configuring database for {{ rails_env }} environment..."
+        
+        if ! grep -q "^{{ rails_env }}:" config/database.yml; then
+          echo "Adding {{ rails_env }} database configuration..."
+          cat >> config/database.yml << EOF
+
+{{ rails_env }}:
+  <<: *default
+  database: hello_world_app_{{ rails_env }}
+  username: {{ deploy_user }}
+  password: deploy123
+  host: localhost
+EOF
+        fi
+        
         echo "Rails environment configured"
       become_user: "{{ deploy_user }}"
       args:
@@ -691,13 +706,33 @@ EOF
       shell: |
         echo "Stopping existing servers..."
         
-        pgrep -f 'python.*http.server' | xargs -r kill -TERM 2>/dev/null || true
-        pgrep -f 'rails server' | xargs -r kill -TERM 2>/dev/null || true
+        PYTHON_PIDS=$(pgrep -f 'python.*http.server' || true)
+        RAILS_PIDS=$(pgrep -f 'rails server' || true)
+        
+        if [ -n "$PYTHON_PIDS" ]; then
+          echo "Stopping Python servers: $PYTHON_PIDS"
+          echo "$PYTHON_PIDS" | xargs -r kill -TERM 2>/dev/null || true
+        fi
+        
+        if [ -n "$RAILS_PIDS" ]; then
+          echo "Stopping Rails servers: $RAILS_PIDS"
+          echo "$RAILS_PIDS" | xargs -r kill -TERM 2>/dev/null || true
+        fi
         
         sleep 3
         
-        pgrep -f 'python.*http.server' | xargs -r kill -KILL 2>/dev/null || true
-        pgrep -f 'rails server' | xargs -r kill -KILL 2>/dev/null || true
+        PYTHON_PIDS=$(pgrep -f 'python.*http.server' || true)
+        RAILS_PIDS=$(pgrep -f 'rails server' || true)
+        
+        if [ -n "$PYTHON_PIDS" ]; then
+          echo "Force killing Python servers: $PYTHON_PIDS"
+          echo "$PYTHON_PIDS" | xargs -r kill -KILL 2>/dev/null || true
+        fi
+        
+        if [ -n "$RAILS_PIDS" ]; then
+          echo "Force killing Rails servers: $RAILS_PIDS"
+          echo "$RAILS_PIDS" | xargs -r kill -KILL 2>/dev/null || true
+        fi
         
         echo "Existing servers stopped"
       become_user: "{{ deploy_user }}"
