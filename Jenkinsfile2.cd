@@ -630,6 +630,8 @@ EOF
       become_user: "{{ deploy_user }}"
       environment:
         PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
+      args:
+        executable: /bin/bash
 
     - name: Configure Rails environment
       shell: |
@@ -654,6 +656,8 @@ EOF
         
         echo "Rails environment configured"
       become_user: "{{ deploy_user }}"
+      args:
+        executable: /bin/bash
 
     - name: Database operations
       shell: |
@@ -666,7 +670,7 @@ EOF
         
         echo "Setting up database..."
         echo "Environment: $RAILS_ENV"
-        echo "Secret key base: ${SECRET_KEY_BASE:0:20}..."
+        echo "Secret key base generated successfully"
         
         RAILS_ENV={{ rails_env }} SECRET_KEY_BASE=$SECRET_KEY_BASE bundle exec rake db:create 2>/dev/null || echo "Database already exists"
         RAILS_ENV={{ rails_env }} SECRET_KEY_BASE=$SECRET_KEY_BASE bundle exec rake db:migrate
@@ -680,6 +684,8 @@ EOF
       environment:
         PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
         RAILS_ENV: "{{ rails_env }}"
+      args:
+        executable: /bin/bash
 
     - name: Stop existing servers
       shell: |
@@ -695,6 +701,8 @@ EOF
         
         echo "Existing servers stopped"
       become_user: "{{ deploy_user }}"
+      args:
+        executable: /bin/bash
 
     - name: Start Rails Server
       shell: |
@@ -732,6 +740,8 @@ EOF
       become_user: "{{ deploy_user }}"
       environment:
         PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
+      args:
+        executable: /bin/bash
 
     - name: Verify Rails deployment
       shell: |
@@ -768,6 +778,8 @@ EOF
         echo "Log File: {{ deploy_path }}/{{ rails_env }}/current/log/rails.log"
       become_user: "{{ deploy_user }}"
       ignore_errors: yes
+      args:
+        executable: /bin/bash
 
     - name: Display deployment success message
       debug:
