@@ -28,29 +28,23 @@ pipeline {
         APP_NAME = 'hello-world-app'
         ANSIBLE_HOST_KEY_CHECKING = 'False'
         ANSIBLE_STDOUT_CALLBACK = 'yaml'
+        ANSIBLE_CONFIG = "${WORKSPACE}/ansible/ansible.cfg"
     }
     
     stages {
-        stage('Tool Verification') {
-            when {
-                expression { !params.SKIP_TOOL_CHECK }
-            }
+        stage('Setup Ansible Environment') {
             steps {
                 script {
                     sh '''
-                        echo "🔍 TOOL VERIFICATION"
-                        echo "===================="
-                        echo "Environment: ${ENVIRONMENT}"
-                        echo "Force installation: ${FORCE_TOOL_INSTALLATION}"
-                        echo ""
+                        echo "🔧 Setting up Ansible environment..."
                         
                         # Find Ansible binary
                         ANSIBLE_BINARY=""
                         POSSIBLE_PATHS=(
-                            "/usr/local/bin/ansible-playbook"
-                            "/opt/homebrew/bin/ansible-playbook"
-                            "$HOME/Library/Python/3.9/bin/ansible-playbook"
-                            "$HOME/.local/bin/ansible-playbook"
+                            "/usr/local/bin/ansible"
+                            "/opt/homebrew/bin/ansible"
+                            "$HOME/Library/Python/3.9/bin/ansible"
+                            "$HOME/.local/bin/ansible"
                         )
                         
                         for path in "${POSSIBLE_PATHS[@]}"; do
@@ -66,18 +60,36 @@ pipeline {
                             exit 1
                         fi
                         
-                        echo "🚀 Running tool verification with existing playbook..."
+                        echo "$ANSIBLE_BINARY" > /tmp/ansible_path
+                        echo "ANSIBLE_DIR=$(dirname $ANSIBLE_BINARY)" > /tmp/ansible_env
                         
-                        # Run your existing tool verification playbook
-                        $ANSIBLE_BINARY -i inventories/${ENVIRONMENT}/hosts \\
-                            playbooks/verify_tools.yml \\
+                        echo "✅ Ansible environment configured"
+                    '''
+                }
+            }
+        }
+        
+        stage('Tool Verification') {
+            when {
+                expression { !params.SKIP_TOOL_CHECK }
+            }
+            steps {
+                script {
+                    sh '''
+                        source /tmp/ansible_env
+                        ANSIBLE_PLAYBOOK_BINARY="$(dirname $(cat /tmp/ansible_path))/ansible-playbook"
+                        
+                        echo "🔍 Running tool verification..."
+                        
+                        $ANSIBLE_PLAYBOOK_BINARY -i ansible/inventories/${ENVIRONMENT}/hosts \\
+                            ansible/playbooks/tool-verification.yml \\
                             --extra-vars "force_tool_installation=${FORCE_TOOL_INSTALLATION}" \\
                             -v
                         
                         if [ $? -eq 0 ]; then
-                            echo "✅ TOOL VERIFICATION COMPLETED!"
+                            echo "✅ Tool verification completed"
                         else
-                            echo "❌ TOOL VERIFICATION FAILED!"
+                            echo "❌ Tool verification failed"
                             exit 1
                         fi
                     '''
@@ -89,9 +101,9 @@ pipeline {
             steps {
                 script {
                     def deploymentMessage = """
-🚀 READY TO DEPLOY: All tools verified!
+🚀 READY TO DEPLOY: Rails application to ${params.ENVIRONMENT}
 
-Deploy Rails application to ${params.ENVIRONMENT}?
+Deploy using Ansible automation?
 """
                     if (params.ENVIRONMENT == 'production') {
                         deploymentMessage = """
@@ -127,7 +139,7 @@ Build: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}
                     def buildNumber = params.BUILD_NUMBER_TO_DEPLOY ?: ''
                     def ciJobName = 'hello-rails'
                     
-                    echo "Downloading artifact from: ${ciJobName}"
+                    echo "📦 Downloading artifact from: ${ciJobName}"
                     
                     try {
                         if (buildNumber) {
@@ -146,10 +158,10 @@ Build: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}
                         
                         sh '''
                             if ls hello-world-app-*.tar.gz 1> /dev/null 2>&1; then
-                                echo "✅ Artifact files found:"
+                                echo "✅ Artifact found:"
                                 ls -la hello-world-app-*.tar.gz
                             else
-                                echo "❌ No artifact files found!"
+                                echo "❌ No artifact found!"
                                 exit 1
                             fi
                         '''
@@ -169,21 +181,20 @@ Build: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}
                         ARTIFACT_FILE=$(ls hello-world-app-*.tar.gz | head -1)
                         BUILD_NUM=$(echo $ARTIFACT_FILE | sed 's/hello-world-app-//; s/.tar.gz//')
                         
+                        echo "📋 Preparing deployment variables..."
                         echo "Artifact: $ARTIFACT_FILE"
                         echo "Build number: $BUILD_NUM"
                         
                         # Create variables file for Ansible
-                        cat > deployment_vars.yml << EOF
+                        cat > ansible/extra_vars.yml << EOF
 build_number: ${BUILD_NUM}
-artifact_file: ${ARTIFACT_FILE}
-artifact_path: $(pwd)/${ARTIFACT_FILE}
+local_artifact_path: $(pwd)/${ARTIFACT_FILE}
 environment: ${ENVIRONMENT}
 deployed_by: ${DEPLOYMENT_APPROVER}
 deployed_at: $(date)
 EOF
                         
-                        echo "=== Deployment Variables ==="
-                        cat deployment_vars.yml
+                        echo "✅ Deployment variables prepared"
                     '''
                 }
             }
@@ -193,24 +204,12 @@ EOF
             steps {
                 script {
                     sh '''
-                        # Find Ansible binary
-                        ANSIBLE_BINARY=""
-                        POSSIBLE_PATHS=(
-                            "/usr/local/bin/ansible"
-                            "/opt/homebrew/bin/ansible"
-                            "$HOME/Library/Python/3.9/bin/ansible"
-                            "$HOME/.local/bin/ansible"
-                        )
+                        source /tmp/ansible_env
+                        ANSIBLE_BINARY=$(cat /tmp/ansible_path)
                         
-                        for path in "${POSSIBLE_PATHS[@]}"; do
-                            if [ -f "$path" ]; then
-                                ANSIBLE_BINARY="$path"
-                                break
-                            fi
-                        done
+                        echo "🔗 Testing Ansible connectivity..."
                         
-                        echo "Testing connectivity to ${ENVIRONMENT} servers..."
-                        $ANSIBLE_BINARY -i inventories/${ENVIRONMENT}/hosts webservers -m ping
+                        $ANSIBLE_BINARY -i ansible/inventories/${ENVIRONMENT}/hosts webservers -m ping
                         
                         if [ $? -eq 0 ]; then
                             echo "✅ Connectivity test passed"
@@ -227,28 +226,14 @@ EOF
             steps {
                 script {
                     sh '''
-                        # Find Ansible playbook binary
-                        ANSIBLE_PLAYBOOK_BINARY=""
-                        POSSIBLE_PATHS=(
-                            "/usr/local/bin/ansible-playbook"
-                            "/opt/homebrew/bin/ansible-playbook"
-                            "$HOME/Library/Python/3.9/bin/ansible-playbook"
-                            "$HOME/.local/bin/ansible-playbook"
-                        )
+                        source /tmp/ansible_env
+                        ANSIBLE_PLAYBOOK_BINARY="$(dirname $(cat /tmp/ansible_path))/ansible-playbook"
                         
-                        for path in "${POSSIBLE_PATHS[@]}"; do
-                            if [ -f "$path" ]; then
-                                ANSIBLE_PLAYBOOK_BINARY="$path"
-                                break
-                            fi
-                        done
+                        echo "🚀 Deploying Rails application..."
                         
-                        echo "🚀 Deploying Rails application using existing playbook..."
-                        
-                        # Run your existing deployment playbook
-                        $ANSIBLE_PLAYBOOK_BINARY -i inventories/${ENVIRONMENT}/hosts \\
-                            playbooks/deploy.yml \\
-                            --extra-vars @deployment_vars.yml \\
+                        $ANSIBLE_PLAYBOOK_BINARY -i ansible/inventories/${ENVIRONMENT}/hosts \\
+                            ansible/playbooks/rails-deployment.yml \\
+                            --extra-vars @ansible/extra_vars.yml \\
                             -v
                         
                         if [ $? -eq 0 ]; then
@@ -262,25 +247,23 @@ EOF
             }
         }
         
-        stage('Post-Deployment Verification') {
+        stage('Verify Deployment') {
             steps {
                 script {
                     withCredentials([
                         string(credentialsId: "ec2-${params.ENVIRONMENT}-host", variable: 'EC2_HOST')
                     ]) {
                         sh '''
-                            echo "🏥 Verifying Rails application..."
+                            echo "🏥 Verifying Rails application deployment..."
                             
-                            # Wait for Rails application to fully start
                             sleep 30
                             
-                            MAX_RETRIES=12
+                            MAX_RETRIES=10
                             RETRY_COUNT=0
                             
                             while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
                                 echo "Verification attempt $((RETRY_COUNT + 1))/$MAX_RETRIES"
                                 
-                                # Check if Rails server is responding
                                 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${EC2_HOST}:3000/ || echo "000")
                                 
                                 if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "500" ]; then
@@ -294,9 +277,7 @@ EOF
                             done
                             
                             if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-                                echo "❌ Rails application verification failed after $MAX_RETRIES attempts"
-                                echo "🔍 Attempting to check server status..."
-                                curl -v http://${EC2_HOST}:3000/ || true
+                                echo "❌ Application verification failed after $MAX_RETRIES attempts"
                                 exit 1
                             fi
                         '''
@@ -322,15 +303,15 @@ Environment: ${ENVIRONMENT}
 Server: ${EC2_HOST}
 Approved by: ${DEPLOYMENT_APPROVER}
 Build: ${BUILD_NUMBER_TO_DEPLOY:-latest}
-Time: $(date)
+Deployment Time: $(date)
 
-🔗 Access Your Rails Application:
+🔗 Access Your Application:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🌍 Main App: http://${EC2_HOST}:3000/
-📝 Check logs on server for details
+📝 Logs: /var/www/hello-world-app/${ENVIRONMENT}/current/log/rails.log
 🔧 SSH: ssh deploy@${EC2_HOST}
 
-🎯 SUCCESS: Rails application is now live and running!
+🎯 SUCCESS: Rails application is now live!
                             "
                         '''
                     }
@@ -352,7 +333,7 @@ Time: $(date)
             script {
                 sh '''
                     rm -f hello-world-app-*.tar.gz
-                    rm -f deployment_vars.yml
+                    rm -f ansible/extra_vars.yml
                 '''
             }
             cleanWs()

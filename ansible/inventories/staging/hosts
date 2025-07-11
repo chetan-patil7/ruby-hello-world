@@ -1,19 +1,12 @@
 [webservers]
 staging-server ansible_host=54.210.171.180 ansible_user=deploy
-[contabo_dev]
-dev-server-1 ansible_host=YOUR_DEV_SERVER_1_IP
-dev-server-2 ansible_host=YOUR_DEV_SERVER_2_IP
-
-[contabo_staging]  
-staging-server ansible_host=YOUR_STAGING_SERVER_IP
-
-[contabo_prod]
-prod-server-1 ansible_host=YOUR_PROD_SERVER_IP
 
 [all:vars]
 ansible_ssh_private_key_file=~/.ssh/deploy_key
-ansible_ssh_common_args='-o StrictHostKeyChecking=no'
 rails_env=staging
 app_name=hello-world-app
 deploy_user=deploy
 deploy_path=/var/www/hello-world-app
+database_name=hello_world_app_staging
+database_user=deploy
+database_password=deploy123
