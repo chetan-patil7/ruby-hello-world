@@ -186,7 +186,7 @@ Build: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}
                         echo "Build number: $BUILD_NUM"
                         
                         # Create variables file for Ansible
-                        cat > ansible/extra_vars.yml << EOF
+                        cat > ansible/playbooks/extra_vars.yml << EOF
 build_number: ${BUILD_NUM}
 local_artifact_path: $(pwd)/${ARTIFACT_FILE}
 environment: ${ENVIRONMENT}
