@@ -37,32 +37,30 @@
         path: "{{ deploy_path }}/{{ rails_env }}/current/Gemfile"
       register: rails_app
 
-    - name: Try to start Rails server
+    - name: Start Rails UI server
       shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
-        export PATH="/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:$PATH"
-        eval "$(rbenv init - 2>/dev/null)" || true
-        
-        # Try bundle exec rails server
-        if command -v bundle >/dev/null 2>&1 && [ -f Gemfile ]; then
-          echo "Starting Rails server with bundle..."
-          nohup bundle exec rails server -e {{ rails_env }} -p 3000 -b 0.0.0.0 > /tmp/rails.log 2>&1 &
-          echo $! > /tmp/rails.pid
-        elif command -v ruby >/dev/null 2>&1; then
-          echo "Starting Ruby HTTP server..."
-          nohup ruby -run -e httpd . -p 3000 > /tmp/ruby_server.log 2>&1 &
-          echo $! > /tmp/ruby.pid
-        else
-          echo "Starting Python HTTP server..."
-          nohup python3 -m http.server 3000 > /tmp/python_server.log 2>&1 &
-          echo $! > /tmp/python.pid
-        fi
-        
-        sleep 3
-        echo "Server startup command completed"
+
+        echo "Setting Rails environment..."
+        export RAILS_ENV=development
+        export SECRET_KEY_BASE=$(bundle exec rails secret)
+
+        echo "Stopping existing servers..."
+        pkill -f 'python.*http.server' || true
+        pkill -f 'rails server' || true
+        sleep 2
+
+        echo "Running DB migrations..."
+        bundle install
+        yarn install --check-files || true
+        bundle exec rails db:migrate
+
+        echo "Starting Rails server..."
+        nohup bundle exec rails server -e development -p 3000 -b 0.0.0.0 > /tmp/rails.log 2>&1 &
+        sleep 5
       become_user: "{{ deploy_user }}"
-      async: 45
-      poll: 0
+      ignore_errors: yes
+
       
     - name: Wait for server to start
       pause:
