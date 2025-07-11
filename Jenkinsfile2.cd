@@ -744,10 +744,11 @@ EOF
         
         # Test HTTP connection
         sleep 5
-        if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 | grep -q "200\|404\|500"; then
-          echo "✅ Rails application responding to HTTP requests"
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 || echo "000")
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "500" ]; then
+          echo "✅ Rails application responding to HTTP requests (HTTP $HTTP_CODE)"
         else
-          echo "⚠️  Rails application might still be starting up"
+          echo "⚠️  Rails application might still be starting up (HTTP $HTTP_CODE)"
         fi
         
         echo ""
