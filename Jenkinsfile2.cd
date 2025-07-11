@@ -631,6 +631,33 @@ EOF
       environment:
         PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
 
+    - name: Configure Rails environment
+      shell: |
+        cd {{ deploy_path }}/{{ rails_env }}/current
+        
+        echo "Configuring Rails environment..."
+        
+        # Create staging environment config if it doesn't exist
+        if [ ! -f "config/environments/{{ rails_env }}.rb" ]; then
+          echo "Creating {{ rails_env }}.rb environment file..."
+          cp config/environments/development.rb config/environments/{{ rails_env }}.rb
+        fi
+        
+        # Fix eager_load configuration
+        if grep -q "config.eager_load.*nil" config/environments/{{ rails_env }}.rb; then
+          echo "Fixing eager_load configuration..."
+          sed -i 's/config.eager_load.*=.*nil/config.eager_load = false/' config/environments/{{ rails_env }}.rb
+        fi
+        
+        # Add eager_load setting if missing
+        if ! grep -q "config.eager_load" config/environments/{{ rails_env }}.rb; then
+          echo "Adding eager_load configuration..."
+          echo "  config.eager_load = false" >> config/environments/{{ rails_env }}.rb
+        fi
+        
+        echo "Rails environment configured"
+      become_user: "{{ deploy_user }}"
+
     - name: Database operations
       shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
@@ -638,14 +665,17 @@ EOF
         export PATH="/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:$PATH"
         eval "$(rbenv init -)"
         export RAILS_ENV={{ rails_env }}
+        export SECRET_KEY_BASE=$(bundle exec rails secret)
         
         echo "Setting up database..."
+        echo "Environment: $RAILS_ENV"
+        echo "Secret key base: ${SECRET_KEY_BASE:0:20}..."
         
-        RAILS_ENV={{ rails_env }} bundle exec rake db:create 2>/dev/null || echo "Database already exists"
-        RAILS_ENV={{ rails_env }} bundle exec rake db:migrate
+        RAILS_ENV={{ rails_env }} SECRET_KEY_BASE=$SECRET_KEY_BASE bundle exec rake db:create 2>/dev/null || echo "Database already exists"
+        RAILS_ENV={{ rails_env }} SECRET_KEY_BASE=$SECRET_KEY_BASE bundle exec rake db:migrate
         
         if [ -d "app/assets" ]; then
-          RAILS_ENV={{ rails_env }} bundle exec rake assets:precompile
+          RAILS_ENV={{ rails_env }} SECRET_KEY_BASE=$SECRET_KEY_BASE bundle exec rake assets:precompile
         fi
         
         echo "Database operations completed"
@@ -658,10 +688,13 @@ EOF
       shell: |
         echo "Stopping existing servers..."
         
-        pkill -f 'python.*http.server' || true
-        pkill -f 'rails server' || true
+        pgrep -f 'python.*http.server' | xargs -r kill -TERM 2>/dev/null || true
+        pgrep -f 'rails server' | xargs -r kill -TERM 2>/dev/null || true
         
-        sleep 5
+        sleep 3
+        
+        pgrep -f 'python.*http.server' | xargs -r kill -KILL 2>/dev/null || true
+        pgrep -f 'rails server' | xargs -r kill -KILL 2>/dev/null || true
         
         echo "Existing servers stopped"
       become_user: "{{ deploy_user }}"
