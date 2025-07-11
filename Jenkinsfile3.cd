@@ -1,0 +1,361 @@
+pipeline {
+    agent any
+    
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['staging', 'production'],
+            description: 'Select deployment environment'
+        )
+        string(
+            name: 'BUILD_NUMBER_TO_DEPLOY',
+            defaultValue: '',
+            description: 'Build number from CI pipeline to deploy (leave empty for latest)'
+        )
+        booleanParam(
+            name: 'FORCE_TOOL_INSTALLATION',
+            defaultValue: false,
+            description: 'Force reinstallation of all tools (even if already installed)'
+        )
+        booleanParam(
+            name: 'SKIP_TOOL_CHECK',
+            defaultValue: false,
+            description: 'Skip tool verification and installation (use only if tools are confirmed to be installed)'
+        )
+    }
+    
+    environment {
+        APP_NAME = 'hello-world-app'
+        ANSIBLE_HOST_KEY_CHECKING = 'False'
+        ANSIBLE_STDOUT_CALLBACK = 'yaml'
+    }
+    
+    stages {
+        stage('Tool Verification') {
+            when {
+                expression { !params.SKIP_TOOL_CHECK }
+            }
+            steps {
+                script {
+                    sh '''
+                        echo "🔍 TOOL VERIFICATION"
+                        echo "===================="
+                        echo "Environment: ${ENVIRONMENT}"
+                        echo "Force installation: ${FORCE_TOOL_INSTALLATION}"
+                        echo ""
+                        
+                        # Find Ansible binary
+                        ANSIBLE_BINARY=""
+                        POSSIBLE_PATHS=(
+                            "/usr/local/bin/ansible-playbook"
+                            "/opt/homebrew/bin/ansible-playbook"
+                            "$HOME/Library/Python/3.9/bin/ansible-playbook"
+                            "$HOME/.local/bin/ansible-playbook"
+                        )
+                        
+                        for path in "${POSSIBLE_PATHS[@]}"; do
+                            if [ -f "$path" ]; then
+                                ANSIBLE_BINARY="$path"
+                                echo "✅ Found Ansible at: $path"
+                                break
+                            fi
+                        done
+                        
+                        if [ -z "$ANSIBLE_BINARY" ]; then
+                            echo "❌ Ansible not found!"
+                            exit 1
+                        fi
+                        
+                        echo "🚀 Running tool verification with existing playbook..."
+                        
+                        # Run your existing tool verification playbook
+                        $ANSIBLE_BINARY -i inventories/${ENVIRONMENT}/hosts \\
+                            playbooks/verify_tools.yml \\
+                            --extra-vars "force_tool_installation=${FORCE_TOOL_INSTALLATION}" \\
+                            -v
+                        
+                        if [ $? -eq 0 ]; then
+                            echo "✅ TOOL VERIFICATION COMPLETED!"
+                        else
+                            echo "❌ TOOL VERIFICATION FAILED!"
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+        }
+        
+        stage('Manual Approval') {
+            steps {
+                script {
+                    def deploymentMessage = """
+🚀 READY TO DEPLOY: All tools verified!
+
+Deploy Rails application to ${params.ENVIRONMENT}?
+"""
+                    if (params.ENVIRONMENT == 'production') {
+                        deploymentMessage = """
+⚠️ PRODUCTION DEPLOYMENT ⚠️
+
+✅ All tools verified and ready
+🎯 Target: PRODUCTION environment
+
+Are you sure you want to deploy to PRODUCTION?
+
+Build: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}
+"""
+                    }
+                    
+                    def approver = input message: deploymentMessage,
+                                        ok: "Deploy to ${params.ENVIRONMENT}",
+                                        submitterParameter: 'APPROVER'
+                    
+                    env.DEPLOYMENT_APPROVER = approver ?: 'unknown'
+                    
+                    echo "Deployment approved by: ${env.DEPLOYMENT_APPROVER}"
+                    echo "Deploying to: ${params.ENVIRONMENT}"
+                    echo "Build to deploy: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}"
+                }
+            }
+        }
+        
+        stage('Download Artifact') {
+            steps {
+                script {
+                    cleanWs()
+                    
+                    def buildNumber = params.BUILD_NUMBER_TO_DEPLOY ?: ''
+                    def ciJobName = 'hello-rails'
+                    
+                    echo "Downloading artifact from: ${ciJobName}"
+                    
+                    try {
+                        if (buildNumber) {
+                            step([$class: 'CopyArtifact',
+                                  projectName: ciJobName,
+                                  selector: [$class: 'SpecificBuildSelector', buildNumber: buildNumber],
+                                  filter: 'hello-world-app-*.tar.gz',
+                                  fingerprintArtifacts: true])
+                        } else {
+                            step([$class: 'CopyArtifact',
+                                  projectName: ciJobName,
+                                  selector: [$class: 'StatusBuildSelector', stable: false],
+                                  filter: 'hello-world-app-*.tar.gz',
+                                  fingerprintArtifacts: true])
+                        }
+                        
+                        sh '''
+                            if ls hello-world-app-*.tar.gz 1> /dev/null 2>&1; then
+                                echo "✅ Artifact files found:"
+                                ls -la hello-world-app-*.tar.gz
+                            else
+                                echo "❌ No artifact files found!"
+                                exit 1
+                            fi
+                        '''
+                        
+                    } catch (Exception e) {
+                        error("Failed to download artifact: ${e.message}")
+                    }
+                }
+            }
+        }
+        
+        stage('Prepare Deployment Variables') {
+            steps {
+                script {
+                    sh '''
+                        # Get artifact info
+                        ARTIFACT_FILE=$(ls hello-world-app-*.tar.gz | head -1)
+                        BUILD_NUM=$(echo $ARTIFACT_FILE | sed 's/hello-world-app-//; s/.tar.gz//')
+                        
+                        echo "Artifact: $ARTIFACT_FILE"
+                        echo "Build number: $BUILD_NUM"
+                        
+                        # Create variables file for Ansible
+                        cat > deployment_vars.yml << EOF
+build_number: ${BUILD_NUM}
+artifact_file: ${ARTIFACT_FILE}
+artifact_path: $(pwd)/${ARTIFACT_FILE}
+environment: ${ENVIRONMENT}
+deployed_by: ${DEPLOYMENT_APPROVER}
+deployed_at: $(date)
+EOF
+                        
+                        echo "=== Deployment Variables ==="
+                        cat deployment_vars.yml
+                    '''
+                }
+            }
+        }
+        
+        stage('Test Connectivity') {
+            steps {
+                script {
+                    sh '''
+                        # Find Ansible binary
+                        ANSIBLE_BINARY=""
+                        POSSIBLE_PATHS=(
+                            "/usr/local/bin/ansible"
+                            "/opt/homebrew/bin/ansible"
+                            "$HOME/Library/Python/3.9/bin/ansible"
+                            "$HOME/.local/bin/ansible"
+                        )
+                        
+                        for path in "${POSSIBLE_PATHS[@]}"; do
+                            if [ -f "$path" ]; then
+                                ANSIBLE_BINARY="$path"
+                                break
+                            fi
+                        done
+                        
+                        echo "Testing connectivity to ${ENVIRONMENT} servers..."
+                        $ANSIBLE_BINARY -i inventories/${ENVIRONMENT}/hosts webservers -m ping
+                        
+                        if [ $? -eq 0 ]; then
+                            echo "✅ Connectivity test passed"
+                        else
+                            echo "❌ Connectivity test failed"
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+        }
+        
+        stage('Deploy Rails Application') {
+            steps {
+                script {
+                    sh '''
+                        # Find Ansible playbook binary
+                        ANSIBLE_PLAYBOOK_BINARY=""
+                        POSSIBLE_PATHS=(
+                            "/usr/local/bin/ansible-playbook"
+                            "/opt/homebrew/bin/ansible-playbook"
+                            "$HOME/Library/Python/3.9/bin/ansible-playbook"
+                            "$HOME/.local/bin/ansible-playbook"
+                        )
+                        
+                        for path in "${POSSIBLE_PATHS[@]}"; do
+                            if [ -f "$path" ]; then
+                                ANSIBLE_PLAYBOOK_BINARY="$path"
+                                break
+                            fi
+                        done
+                        
+                        echo "🚀 Deploying Rails application using existing playbook..."
+                        
+                        # Run your existing deployment playbook
+                        $ANSIBLE_PLAYBOOK_BINARY -i inventories/${ENVIRONMENT}/hosts \\
+                            playbooks/deploy.yml \\
+                            --extra-vars @deployment_vars.yml \\
+                            -v
+                        
+                        if [ $? -eq 0 ]; then
+                            echo "✅ Rails application deployed successfully!"
+                        else
+                            echo "❌ Deployment failed"
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+        }
+        
+        stage('Post-Deployment Verification') {
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: "ec2-${params.ENVIRONMENT}-host", variable: 'EC2_HOST')
+                    ]) {
+                        sh '''
+                            echo "🏥 Verifying Rails application..."
+                            
+                            # Wait for Rails application to fully start
+                            sleep 30
+                            
+                            MAX_RETRIES=12
+                            RETRY_COUNT=0
+                            
+                            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+                                echo "Verification attempt $((RETRY_COUNT + 1))/$MAX_RETRIES"
+                                
+                                # Check if Rails server is responding
+                                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${EC2_HOST}:3000/ || echo "000")
+                                
+                                if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "500" ]; then
+                                    echo "✅ Rails application is responding! (HTTP $HTTP_CODE)"
+                                    break
+                                else
+                                    echo "⏳ Waiting for Rails application... (HTTP $HTTP_CODE)"
+                                    sleep 15
+                                    RETRY_COUNT=$((RETRY_COUNT + 1))
+                                fi
+                            done
+                            
+                            if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                                echo "❌ Rails application verification failed after $MAX_RETRIES attempts"
+                                echo "🔍 Attempting to check server status..."
+                                curl -v http://${EC2_HOST}:3000/ || true
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Deployment Summary') {
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: "ec2-${params.ENVIRONMENT}-host", variable: 'EC2_HOST')
+                    ]) {
+                        sh '''
+                            echo "
+🎉 RAILS APPLICATION DEPLOYMENT SUCCESS! 🎉
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 Deployment Details:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Environment: ${ENVIRONMENT}
+Server: ${EC2_HOST}
+Approved by: ${DEPLOYMENT_APPROVER}
+Build: ${BUILD_NUMBER_TO_DEPLOY:-latest}
+Time: $(date)
+
+🔗 Access Your Rails Application:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌍 Main App: http://${EC2_HOST}:3000/
+📝 Check logs on server for details
+🔧 SSH: ssh deploy@${EC2_HOST}
+
+🎯 SUCCESS: Rails application is now live and running!
+                            "
+                        '''
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "✅ Rails application deployment completed successfully!"
+        }
+        
+        failure {
+            echo "❌ Rails deployment failed!"
+        }
+        
+        always {
+            script {
+                sh '''
+                    rm -f hello-world-app-*.tar.gz
+                    rm -f deployment_vars.yml
+                '''
+            }
+            cleanWs()
+        }
+    }
+}

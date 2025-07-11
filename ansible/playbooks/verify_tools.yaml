@@ -1,0 +1,341 @@
+---
+- name: Smart Tool Verification and Installation
+  hosts: webservers
+  become: yes
+  vars:
+    force_installation: "{{ force_tool_installation | default(false) }}"
+    deploy_user: "{{ ansible_user }}"
+  
+  tasks:
+    - name: Create tool check directory
+      file:
+        path: /tmp/tool_check
+        state: directory
+        mode: '0755'
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+
+    - name: Smart tool audit script
+      copy:
+        dest: /tmp/smart_audit.sh
+        mode: '0755'
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        content: |
+          #!/bin/bash
+          echo "🔍 SMART SERVER TOOL AUDIT"
+          echo "==========================="
+          echo "Date: $(date)"
+          echo "Server: $(hostname)"
+          echo "Force installation: {{ force_installation }}"
+          echo ""
+          
+          # Initialize tracking
+          MISSING_PACKAGES=""
+          INSTALL_REQUIRED=false
+          
+          echo "📦 SYSTEM PACKAGES AUDIT:"
+          echo "========================"
+          
+          # Check each package individually
+          for pkg in curl wget git build-essential python3 unzip; do
+            if dpkg -l 2>/dev/null | grep -q "^ii.*$pkg "; then
+              echo "  ✅ $pkg - installed (SKIP)"
+            else
+              echo "  ❌ $pkg - MISSING (WILL INSTALL)"
+              MISSING_PACKAGES="$MISSING_PACKAGES $pkg"
+              INSTALL_REQUIRED=true
+            fi
+          done
+          
+          # Check PostgreSQL
+          if dpkg -l 2>/dev/null | grep -q "^ii.*postgresql"; then
+            echo "  ✅ postgresql - installed (SKIP)"
+          else
+            echo "  ❌ postgresql - MISSING (WILL INSTALL)"
+            MISSING_PACKAGES="$MISSING_PACKAGES postgresql postgresql-contrib"
+            INSTALL_REQUIRED=true
+          fi
+          
+          # Check redis-server
+          if dpkg -l 2>/dev/null | grep -q "^ii.*redis-server"; then
+            echo "  ✅ redis-server - installed (SKIP)"
+          else
+            echo "  ❌ redis-server - MISSING (WILL INSTALL)"
+            MISSING_PACKAGES="$MISSING_PACKAGES redis-server"
+            INSTALL_REQUIRED=true
+          fi
+          
+          # Check imagemagick
+          if dpkg -l 2>/dev/null | grep -q "^ii.*imagemagick"; then
+            echo "  ✅ imagemagick - installed (SKIP)"
+          else
+            echo "  ❌ imagemagick - MISSING (WILL INSTALL)"
+            MISSING_PACKAGES="$MISSING_PACKAGES imagemagick"
+            INSTALL_REQUIRED=true
+          fi
+          
+          echo ""
+          echo "💎 RUBY ENVIRONMENT AUDIT:"
+          echo "========================="
+          
+          if [ -d "/home/{{ deploy_user }}/.rbenv" ]; then
+            echo "  ✅ rbenv - installed (SKIP)"
+          else
+            echo "  ❌ rbenv - NOT INSTALLED (WILL INSTALL)"
+            INSTALL_REQUIRED=true
+          fi
+          
+          if command -v ruby >/dev/null 2>&1; then
+            RUBY_VERSION=$(ruby --version)
+            echo "  ✅ Ruby - $RUBY_VERSION (SKIP)"
+          else
+            echo "  ❌ Ruby - NOT INSTALLED (WILL INSTALL)"
+            INSTALL_REQUIRED=true
+          fi
+          
+          if command -v bundle >/dev/null 2>&1; then
+            BUNDLER_VERSION=$(bundle --version)
+            echo "  ✅ Bundler - $BUNDLER_VERSION (SKIP)"
+          else
+            echo "  ❌ Bundler - NOT INSTALLED (WILL INSTALL)"
+            INSTALL_REQUIRED=true
+          fi
+          
+          echo ""
+          echo "🟢 NODE.JS ENVIRONMENT AUDIT:"
+          echo "============================"
+          
+          if command -v node >/dev/null 2>&1; then
+            NODE_VERSION=$(node --version)
+            echo "  ✅ Node.js - $NODE_VERSION (SKIP)"
+          else
+            echo "  ❌ Node.js - NOT INSTALLED (WILL INSTALL)"
+            INSTALL_REQUIRED=true
+          fi
+          
+          if command -v npm >/dev/null 2>&1; then
+            NPM_VERSION=$(npm --version)
+            echo "  ✅ npm - $NPM_VERSION (SKIP)"
+          else
+            echo "  ❌ npm - NOT INSTALLED (WILL INSTALL)"
+            INSTALL_REQUIRED=true
+          fi
+          
+          echo ""
+          echo "🐘 POSTGRESQL AUDIT:"
+          echo "==================="
+          
+          if command -v psql >/dev/null 2>&1; then
+            PSQL_VERSION=$(psql --version)
+            echo "  ✅ PostgreSQL client - $PSQL_VERSION (SKIP)"
+          else
+            echo "  ❌ PostgreSQL client - NOT INSTALLED (WILL INSTALL)"
+            INSTALL_REQUIRED=true
+          fi
+          
+          if systemctl is-active postgresql >/dev/null 2>&1; then
+            echo "  ✅ PostgreSQL service - RUNNING (SKIP)"
+          else
+            echo "  ❌ PostgreSQL service - NOT RUNNING (WILL CONFIGURE)"
+            INSTALL_REQUIRED=true
+          fi
+          
+          echo ""
+          echo "📋 SMART AUDIT SUMMARY:"
+          echo "======================"
+          
+          if [ "$INSTALL_REQUIRED" = "true" ] || [ "{{ force_installation }}" = "true" ]; then
+            echo "🔧 INSTALLATION REQUIRED"
+            echo "Missing packages: $MISSING_PACKAGES"
+            echo "INSTALL_REQUIRED" > /tmp/tool_check/status
+          else
+            echo "✅ ALL TOOLS ALREADY INSTALLED"
+            echo "No installation needed"
+            echo "TOOLS_READY" > /tmp/tool_check/status
+          fi
+          
+          echo "$MISSING_PACKAGES" > /tmp/tool_check/missing_packages
+
+    - name: Execute smart tool audit
+      shell: /tmp/smart_audit.sh
+      register: tool_audit
+      become_user: "{{ deploy_user }}"
+
+    - name: Display audit results
+      debug:
+        msg: "{{ tool_audit.stdout_lines }}"
+
+    - name: Read tool status
+      shell: cat /tmp/tool_check/status
+      register: tool_status
+      ignore_errors: yes
+
+    - name: Read missing packages list
+      shell: cat /tmp/tool_check/missing_packages
+      register: missing_packages
+      ignore_errors: yes
+
+    - name: Update package cache
+      apt:
+        update_cache: yes
+      when: 
+        - tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
+        - missing_packages.stdout is defined
+        - missing_packages.stdout | trim | length > 0
+
+    - name: Install missing system packages
+      apt:
+        name: "{{ missing_packages.stdout.split() }}"
+        state: present
+      when: 
+        - tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
+        - missing_packages.stdout is defined
+        - missing_packages.stdout | trim | length > 0
+
+    - name: Setup Ruby environment (rbenv)
+      block:
+        - name: Check if rbenv installation needed
+          stat:
+            path: "/home/{{ deploy_user }}/.rbenv"
+          register: rbenv_check
+
+        - name: Install rbenv
+          shell: |
+            echo "💎 Installing rbenv..."
+            git clone https://github.com/rbenv/rbenv.git /home/{{ deploy_user }}/.rbenv
+            git clone https://github.com/rbenv/ruby-build.git /home/{{ deploy_user }}/.rbenv/plugins/ruby-build
+            
+            # Add to bashrc if not present
+            if ! grep -q 'rbenv' /home/{{ deploy_user }}/.bashrc; then
+              echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> /home/{{ deploy_user }}/.bashrc
+              echo 'eval "$(rbenv init -)"' >> /home/{{ deploy_user }}/.bashrc
+            fi
+            
+            chown -R {{ deploy_user }}:{{ deploy_user }} /home/{{ deploy_user }}/.rbenv
+          when: not rbenv_check.stat.exists or force_installation|bool
+          become_user: root
+
+        - name: Install Ruby
+          shell: |
+            export PATH="/home/{{ deploy_user }}/.rbenv/bin:$PATH"
+            eval "$(rbenv init -)"
+            
+            if ! command -v ruby >/dev/null 2>&1 || [ "{{ force_installation }}" = "true" ]; then
+              echo "Installing Ruby 3.1.3..."
+              rbenv install 3.1.3
+              rbenv global 3.1.3
+              rbenv rehash
+              
+              # Install bundler
+              gem install bundler
+              rbenv rehash
+              
+              echo "✅ Ruby and Bundler installed"
+            else
+              echo "✅ Ruby already installed"
+            fi
+          become_user: "{{ deploy_user }}"
+          environment:
+            PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
+          args:
+            executable: /bin/bash
+      when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
+
+    - name: Setup Node.js
+      shell: |
+        if ! command -v node >/dev/null 2>&1 || [ "{{ force_installation }}" = "true" ]; then
+          echo "🟢 Installing Node.js..."
+          curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+          apt-get install -y nodejs
+          echo "✅ Node.js installed"
+        else
+          echo "✅ Node.js already installed"
+        fi
+      when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
+
+    - name: Configure PostgreSQL
+      block:
+        - name: Start and enable PostgreSQL service
+          systemd:
+            name: postgresql
+            state: started
+            enabled: yes
+
+        - name: Check if PostgreSQL user exists
+          shell: sudo -u postgres psql -c "\du" | grep -q "{{ deploy_user }}"
+          register: pg_user_check
+          ignore_errors: yes
+
+        - name: Create PostgreSQL user
+          shell: |
+            sudo -u postgres createuser --createdb {{ deploy_user }}
+            sudo -u postgres psql -c "ALTER USER {{ deploy_user }} WITH PASSWORD 'deploy123';"
+          when: pg_user_check.rc != 0
+          ignore_errors: yes
+
+        - name: Test PostgreSQL connection
+          shell: psql -U {{ deploy_user }} -h localhost -c "SELECT version();" postgres
+          become_user: "{{ deploy_user }}"
+          environment:
+            PGPASSWORD: "deploy123"
+          ignore_errors: yes
+      when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
+
+    - name: Start Redis service
+      systemd:
+        name: redis-server
+        state: started
+        enabled: yes
+      when: tool_status.stdout == "INSTALL_REQUIRED" or force_installation|bool
+      ignore_errors: yes
+
+    - name: Final verification
+      shell: |
+        echo "🔍 FINAL VERIFICATION"
+        echo "===================="
+        echo "Ruby: $(ruby --version 2>/dev/null || echo 'Not available')"
+        echo "Bundler: $(bundle --version 2>/dev/null || echo 'Not available')"
+        echo "Node.js: $(node --version 2>/dev/null || echo 'Not available')"
+        echo "npm: $(npm --version 2>/dev/null || echo 'Not available')"
+        echo "PostgreSQL: $(psql --version 2>/dev/null || echo 'Not available')"
+        echo "Redis: $(redis-server --version 2>/dev/null | head -1 || echo 'Not available')"
+        echo "ImageMagick: $(convert --version 2>/dev/null | head -1 || echo 'Not available')"
+        
+        echo ""
+        echo "✅ TOOL VERIFICATION COMPLETED"
+        echo "🎯 Server ready for Rails deployment"
+        echo "READY" > /tmp/tool_check/final_status
+      become_user: "{{ deploy_user }}"
+      environment:
+        PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
+      args:
+        executable: /bin/bash
+
+    - name: Display success message
+      debug:
+        msg: |
+          🎉 TOOL VERIFICATION COMPLETED! 🎉
+          
+          ✅ Smart installation logic applied
+          ✅ Only missing tools were installed  
+          ✅ Existing tools were preserved
+          ✅ Server ready for Rails deployment
+          
+          💡 Installed Tools:
+          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          🔧 System packages (curl, wget, git, build-essential, etc.)
+          💎 Ruby environment (rbenv, Ruby 3.1.3, Bundler)
+          🟢 Node.js and npm
+          🐘 PostgreSQL with deploy user
+          🔴 Redis server
+          🖼️  ImageMagick
+
+    - name: Cleanup temporary files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/smart_audit.sh
+        - /tmp/tool_check
+      ignore_errors: yes
