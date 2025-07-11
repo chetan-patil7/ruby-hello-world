@@ -704,38 +704,23 @@ EOF
       shell: |
         echo "Stopping existing servers..."
         
-        PYTHON_PIDS=$(pgrep -f 'python.*http.server' || true)
-        RAILS_PIDS=$(pgrep -f 'rails server' || true)
+        # Use a simpler approach to avoid process termination issues
+        killall -TERM python3 2>/dev/null || true
+        killall -TERM python 2>/dev/null || true
+        killall -TERM ruby 2>/dev/null || true
         
-        if [ -n "$PYTHON_PIDS" ]; then
-          echo "Stopping Python servers: $PYTHON_PIDS"
-          echo "$PYTHON_PIDS" | xargs -r kill -TERM 2>/dev/null || true
-        fi
+        sleep 2
         
-        if [ -n "$RAILS_PIDS" ]; then
-          echo "Stopping Rails servers: $RAILS_PIDS"
-          echo "$RAILS_PIDS" | xargs -r kill -TERM 2>/dev/null || true
-        fi
-        
-        sleep 3
-        
-        PYTHON_PIDS=$(pgrep -f 'python.*http.server' || true)
-        RAILS_PIDS=$(pgrep -f 'rails server' || true)
-        
-        if [ -n "$PYTHON_PIDS" ]; then
-          echo "Force killing Python servers: $PYTHON_PIDS"
-          echo "$PYTHON_PIDS" | xargs -r kill -KILL 2>/dev/null || true
-        fi
-        
-        if [ -n "$RAILS_PIDS" ]; then
-          echo "Force killing Rails servers: $RAILS_PIDS"
-          echo "$RAILS_PIDS" | xargs -r kill -KILL 2>/dev/null || true
-        fi
+        # Force kill if still running
+        killall -KILL python3 2>/dev/null || true
+        killall -KILL python 2>/dev/null || true
+        killall -KILL ruby 2>/dev/null || true
         
         echo "Existing servers stopped"
       become_user: "{{ deploy_user }}"
       args:
         executable: /bin/bash
+      ignore_errors: yes
 
     - name: Start Rails Server
       shell: |
