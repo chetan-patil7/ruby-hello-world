@@ -173,32 +173,32 @@ Build: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}
             }
         }
         
-        stage('Prepare Deployment Variables') {
-            steps {
-                script {
-                    sh '''
-                        # Get artifact info
-                        ARTIFACT_FILE=$(ls hello-world-app-*.tar.gz | head -1)
-                        BUILD_NUM=$(echo $ARTIFACT_FILE | sed 's/hello-world-app-//; s/.tar.gz//')
+//         stage('Prepare Deployment Variables') {
+//             steps {
+//                 script {
+//                     sh '''
+//                         # Get artifact info
+//                         ARTIFACT_FILE=$(ls hello-world-app-*.tar.gz | head -1)
+//                         BUILD_NUM=$(echo $ARTIFACT_FILE | sed 's/hello-world-app-//; s/.tar.gz//')
                         
-                        echo "📋 Preparing deployment variables..."
-                        echo "Artifact: $ARTIFACT_FILE"
-                        echo "Build number: $BUILD_NUM"
+//                         echo "📋 Preparing deployment variables..."
+//                         echo "Artifact: $ARTIFACT_FILE"
+//                         echo "Build number: $BUILD_NUM"
                         
-                        # Create variables file for Ansible
-                        cat > ansible/playbooks/extra_vars.yml << EOF
-build_number: ${BUILD_NUM}
-local_artifact_path: $(pwd)/${ARTIFACT_FILE}
-environment: ${ENVIRONMENT}
-deployed_by: ${DEPLOYMENT_APPROVER}
-deployed_at: $(date)
-EOF
+//                         # Create variables file for Ansible
+//                         cat > ansible/playbooks/extra_vars.yml << EOF
+// build_number: ${BUILD_NUM}
+// local_artifact_path: $(pwd)/${ARTIFACT_FILE}
+// environment: ${ENVIRONMENT}
+// deployed_by: ${DEPLOYMENT_APPROVER}
+// deployed_at: $(date)
+// EOF
                         
-                        echo "✅ Deployment variables prepared"
-                    '''
-                }
-            }
-        }
+//                         echo "✅ Deployment variables prepared"
+//                     '''
+//                 }
+//             }
+//         }
         
         stage('Test Connectivity') {
             steps {
