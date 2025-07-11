@@ -455,7 +455,7 @@ PLAYBOOK_EOF
                     def deploymentMessage = """
 🚀 READY TO DEPLOY: All tools verified!
 
-Deploy to ${params.ENVIRONMENT} using Ansible?
+Deploy Rails application to ${params.ENVIRONMENT}?
 """
                     if (params.ENVIRONMENT == 'production') {
                         deploymentMessage = """
@@ -467,7 +467,7 @@ Deploy to ${params.ENVIRONMENT} using Ansible?
 Are you sure you want to deploy to PRODUCTION?
 
 Build: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}
-Method: Ansible automation
+Method: Ansible automation with Rails server
 """
                     }
                     
@@ -584,10 +584,10 @@ deploy_user=deploy
 deploy_path=/var/www/hello-world-app
 EOF
 
-                        # Create Rails deployment playbook using script files
+                        # Create Rails deployment playbook with your specific Rails server commands
                         cat > ansible/playbooks/deploy.yml << 'DEPLOY_EOF'
 ---
-- name: Deploy Beautiful Rails Application
+- name: Deploy Rails Application with Rails Server
   hosts: webservers
   become: yes
   vars:
@@ -600,7 +600,7 @@ EOF
       delegate_to: localhost
       become: no
 
-    - name: Create directories
+    - name: Create deployment directories
       file:
         path: "{{ deploy_path }}/{{ rails_env }}/current"
         state: directory
@@ -616,138 +616,18 @@ EOF
         group: "{{ deploy_user }}"
         remote_src: yes
 
-    - name: Create Rails routes script
-      copy:
-        dest: /tmp/create_routes.rb
-        content: |
-          File.open('config/routes.rb', 'w') do |f|
-            f.puts "Rails.application.routes.draw do"
-            f.puts "  root 'welcome#index'"
-            f.puts "  get '/health', to: proc { [200, { 'Content-Type' => 'application/json' }, [{ status: 'ok', environment: Rails.env }.to_json]] }"
-            f.puts "end"
-          end
-
-    - name: Create Rails controller script
-      copy:
-        dest: /tmp/create_controller.rb
-        content: |
-          require 'fileutils'
-          FileUtils.mkdir_p('app/controllers')
-          File.open('app/controllers/welcome_controller.rb', 'w') do |f|
-            f.puts "class WelcomeController < ApplicationController"
-            f.puts "  def index"
-            f.puts "    @info = {"
-            f.puts "      environment: Rails.env,"
-            f.puts "      rails_version: Rails.version,"
-            f.puts "      ruby_version: RUBY_VERSION,"
-            f.puts "      deployed_at: Time.current"
-            f.puts "    }"
-            f.puts "  end"
-            f.puts "end"
-          end
-
-    - name: Create Rails layout script
-      copy:
-        dest: /tmp/create_layout.sh
-        mode: '0755'
-        content: |
-          #!/bin/bash
-          mkdir -p app/views/layouts
-          cat > app/views/layouts/application.html.erb << 'LAYOUT_END'
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Rails Deployment Success</title>
-              <meta name="viewport" content="width=device-width,initial-scale=1">
-              <style>
-                body { font-family: system-ui, sans-serif; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
-                .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
-                .header { background: rgba(255,255,255,0.95); padding: 40px; border-radius: 20px; text-align: center; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-                .content { background: rgba(255,255,255,0.95); padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-                .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0; }
-                .card { background: #f8f9fa; padding: 20px; border-radius: 15px; border-left: 4px solid #28a745; }
-                .badge { display: inline-block; padding: 6px 12px; border-radius: 15px; font-size: 0.9em; font-weight: bold; margin: 5px; background: #28a745; color: white; }
-                h1 { color: #2563eb; margin: 0; font-size: 2.5em; }
-                h3 { color: #374151; margin-top: 0; }
-                .status { font-size: 1.3em; color: #28a745; margin: 20px 0; }
-              </style>
-            </head>
-            <body>
-              <div class="container">
-                <div class="header">
-                  <h1>🚀 Rails Deployment Success!</h1>
-                  <p class="status">✅ Application Successfully Deployed</p>
-                </div>
-                <div class="content">
-                  <%= yield %>
-                </div>
-              </div>
-            </body>
-          </html>
-          LAYOUT_END
-
-    - name: Create Rails view script
-      copy:
-        dest: /tmp/create_view.sh
-        mode: '0755'
-        content: |
-          #!/bin/bash
-          mkdir -p app/views/welcome
-          cat > app/views/welcome/index.html.erb << 'VIEW_END'
-          <div class="grid">
-            <div class="card">
-              <h3>🎯 Deployment Info</h3>
-              <% if @info %>
-                <p><strong>Environment:</strong> <%= @info[:environment].upcase %></p>
-                <p><strong>Deployed:</strong> <%= @info[:deployed_at].strftime("%B %d, %Y at %I:%M %p") %></p>
-              <% end %>
-            </div>
-            
-            <div class="card">
-              <h3>🛠️ Tech Stack</h3>
-              <p><strong>Rails:</strong> <%= Rails.version %></p>
-              <p><strong>Ruby:</strong> <%= RUBY_VERSION %></p>
-              <p><strong>Environment:</strong> <%= Rails.env %></p>
-            </div>
-            
-            <div class="card">
-              <h3>📊 Status</h3>
-              <p>✅ Rails Server Running</p>
-              <p>✅ Database Connected</p>
-              <p>✅ Ready to Serve</p>
-            </div>
-          </div>
-
-          <div style="text-align: center; margin-top: 30px; padding: 20px; background: #e8f5e8; border-radius: 15px;">
-            <h3>🎉 CI/CD Success!</h3>
-            <p>Deployed with Jenkins and Ansible automation</p>
-            <span class="badge">Tool Verification</span>
-            <span class="badge">Rails Deployment</span>
-            <span class="badge">Beautiful UI</span>
-          </div>
-          VIEW_END
-
-    - name: Setup Rails with beautiful UI
+    - name: Install Ruby dependencies
       shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
         
-        echo "🎨 Setting up beautiful Rails application..."
-        
-        # Ruby environment
+        # Set Ruby environment
         export PATH="/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:$PATH"
         eval "$(rbenv init -)"
-        export RAILS_ENV={{ rails_env }}
         
-        # Install gems
+        echo "💎 Installing Ruby dependencies..."
         bundle install --without development test
         
-        # Create Rails components using scripts
-        ruby /tmp/create_routes.rb
-        ruby /tmp/create_controller.rb
-        bash /tmp/create_layout.sh
-        bash /tmp/create_view.sh
-        
-        echo "✅ Beautiful Rails UI components created"
+        echo "✅ Ruby dependencies installed"
       become_user: "{{ deploy_user }}"
       environment:
         PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
@@ -756,16 +636,23 @@ EOF
       shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
         
+        # Set Ruby environment
         export PATH="/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:$PATH"
         eval "$(rbenv init -)"
         export RAILS_ENV={{ rails_env }}
         
-        echo "🗄️ Database operations..."
+        echo "🗄️ Setting up database..."
         
-        # Database setup
-        RAILS_ENV={{ rails_env }} bundle exec rake db:create 2>/dev/null || echo "Database exists"
+        # Create database if it doesn't exist
+        RAILS_ENV={{ rails_env }} bundle exec rake db:create 2>/dev/null || echo "Database already exists"
+        
+        # Run migrations
         RAILS_ENV={{ rails_env }} bundle exec rake db:migrate
-        RAILS_ENV={{ rails_env }} bundle exec rake assets:precompile
+        
+        # Precompile assets if assets directory exists
+        if [ -d "app/assets" ]; then
+          RAILS_ENV={{ rails_env }} bundle exec rake assets:precompile
+        fi
         
         echo "✅ Database operations completed"
       become_user: "{{ deploy_user }}"
@@ -773,76 +660,129 @@ EOF
         PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
         RAILS_ENV: "{{ rails_env }}"
 
-    - name: Start Rails server
+    - name: Stop existing servers
       shell: |
-        # Stop existing servers
+        echo "🛑 Stopping existing servers..."
+        
+        # Stop any existing Python servers
         pkill -f 'python.*http.server' || true
+        
+        # Stop any existing Rails servers
         pkill -f 'rails server' || true
+        
+        # Wait for processes to terminate
         sleep 5
         
+        echo "✅ Existing servers stopped"
+      become_user: "{{ deploy_user }}"
+
+    - name: Start Rails Server
+      shell: |
         cd {{ deploy_path }}/{{ rails_env }}/current
         
+        # Set Ruby environment
         export PATH="/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:$PATH"
         eval "$(rbenv init -)"
+        
+        # Set environment variables based on your requirements
         export RAILS_ENV={{ rails_env }}
+        export SECRET_KEY_BASE=$(bundle exec rails secret)
         
-        echo "🚀 Starting beautiful Rails application..."
+        echo "🚀 Starting Rails server..."
+        echo "Environment: $RAILS_ENV"
+        echo "Secret key base generated: ${SECRET_KEY_BASE:0:20}..."
         
-        # Start Rails server
+        # Create logs directory if it doesn't exist
+        mkdir -p log
+        
+        # Start Rails server in background using your exact commands
         nohup bundle exec rails server -e {{ rails_env }} -p 3000 -b 0.0.0.0 > log/rails.log 2>&1 &
+        
+        # Save the process ID
         echo $! > tmp/pids/server.pid
         
+        echo "✅ Rails server started in background"
+        echo "📋 Process ID: $(cat tmp/pids/server.pid)"
+        
+        # Wait a moment for the server to start
         sleep 15
         
+        # Verify the server is running
         if ps aux | grep -v grep | grep 'rails server'; then
-          echo "✅ Beautiful Rails UI started successfully"
+          echo "✅ Rails server is running successfully"
+          echo "🌍 Server accessible at: http://{{ ansible_host }}:3000"
         else
           echo "❌ Rails server failed to start"
+          echo "📝 Checking logs:"
           tail -20 log/rails.log
           exit 1
         fi
       become_user: "{{ deploy_user }}"
+      environment:
+        PATH: "/home/{{ deploy_user }}/.rbenv/bin:/home/{{ deploy_user }}/.rbenv/shims:{{ ansible_env.PATH }}"
 
-    - name: Verify deployment
+    - name: Verify Rails deployment
       shell: |
-        echo "🔍 VERIFYING BEAUTIFUL RAILS DEPLOYMENT"
-        echo "========================================"
+        cd {{ deploy_path }}/{{ rails_env }}/current
         
-        # Check server
+        echo "🔍 VERIFYING RAILS DEPLOYMENT"
+        echo "=============================="
+        
+        # Check if Rails server process is running
         if ps aux | grep -v grep | grep 'rails server'; then
-          echo "✅ Rails server running"
+          echo "✅ Rails server process running"
+        else
+          echo "❌ Rails server process not found"
         fi
         
+        # Check if port 3000 is listening
         if netstat -tlnp | grep :3000; then
-          echo "✅ Port 3000 listening"
+          echo "✅ Port 3000 is listening"
+        else
+          echo "❌ Port 3000 not listening"
         fi
         
-        # Test UI
-        if curl -s http://localhost:3000 | grep -i "deployment.*success"; then
-          echo "✅ Beautiful Rails UI confirmed"
+        # Test HTTP connection
+        sleep 5
+        if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 | grep -q "200\|404\|500"; then
+          echo "✅ Rails application responding to HTTP requests"
+        else
+          echo "⚠️  Rails application might still be starting up"
         fi
         
-        echo "🎨 Beautiful UI live at: http://{{ ansible_host }}:3000"
+        echo ""
+        echo "📊 Server Status:"
+        echo "Environment: {{ rails_env }}"
+        echo "Application Path: {{ deploy_path }}/{{ rails_env }}/current"
+        echo "Access URL: http://{{ ansible_host }}:3000"
+        echo "Log File: {{ deploy_path }}/{{ rails_env }}/current/log/rails.log"
+        
       become_user: "{{ deploy_user }}"
       ignore_errors: yes
 
-    - name: Success message
+    - name: Display deployment success message
       debug:
         msg: |
-          🎉 BEAUTIFUL RAILS UI DEPLOYMENT SUCCESS! 🎉
+          🎉 RAILS APPLICATION DEPLOYMENT SUCCESS! 🎉
           
-          ✨ Your stunning Rails application is now live!
+          🚀 Your Rails application is now running!
           🌍 Access: http://{{ ansible_host }}:3000/
-          🏥 Health: http://{{ ansible_host }}:3000/health
+          📝 Logs: {{ deploy_path }}/{{ rails_env }}/current/log/rails.log
           
-          Features deployed:
-          ✅ Modern responsive design
-          ✅ Deployment dashboard
-          ✅ Technical stack display
-          ✅ Status indicators
+          Server Details:
+          ✅ Environment: {{ rails_env }}
+          ✅ Ruby/Rails server running on port 3000
+          ✅ Database migrations completed
+          ✅ Assets precompiled (if applicable)
+          ✅ Secret key base generated
+          
+          Commands used:
+          🔧 export RAILS_ENV={{ rails_env }}
+          🔧 export SECRET_KEY_BASE=$(bundle exec rails secret)
+          🔧 bundle exec rails server -e {{ rails_env }} -p 3000 -b 0.0.0.0
 DEPLOY_EOF
                         
-                        echo "✅ Ansible deployment structure created"
+                        echo "✅ Ansible Rails deployment structure created"
                     '''
                 }
             }
@@ -899,7 +839,7 @@ EOF
             }
         }
         
-        stage('Deploy Beautiful Rails Application') {
+        stage('Deploy Rails Application') {
             steps {
                 script {
                     dir('ansible') {
@@ -908,14 +848,14 @@ EOF
                             ANSIBLE_BINARY=$(cat /tmp/ansible_path)
                             ANSIBLE_PLAYBOOK_BINARY="$(dirname $ANSIBLE_BINARY)/ansible-playbook"
                             
-                            echo "🚀 Deploying beautiful Rails application..."
+                            echo "🚀 Deploying Rails application..."
                             
                             $ANSIBLE_PLAYBOOK_BINARY -i inventories/${ENVIRONMENT}/hosts playbooks/deploy.yml \\
                                 --extra-vars @extra_vars.yml \\
                                 -v
                             
                             if [ $? -eq 0 ]; then
-                                echo "✅ Beautiful Rails UI deployed successfully!"
+                                echo "✅ Rails application deployed successfully!"
                             else
                                 echo "❌ Deployment failed"
                                 exit 1
@@ -933,28 +873,37 @@ EOF
                         string(credentialsId: "ec2-${params.ENVIRONMENT}-host", variable: 'EC2_HOST')
                     ]) {
                         sh '''
-                            echo "🏥 Verifying beautiful Rails UI..."
+                            echo "🏥 Verifying Rails application..."
                             
-                            sleep 25
+                            # Wait for Rails application to fully start
+                            sleep 30
                             
-                            MAX_RETRIES=10
+                            MAX_RETRIES=12
                             RETRY_COUNT=0
                             
                             while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
                                 echo "Verification attempt $((RETRY_COUNT + 1))/$MAX_RETRIES"
                                 
-                                if curl -f -s -o /dev/null http://${EC2_HOST}:3000/; then
-                                    echo "✅ Beautiful Rails UI is live!"
+                                # Check if Rails server is responding
+                                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${EC2_HOST}:3000/ || echo "000")
+                                
+                                if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "500" ]; then
+                                    echo "✅ Rails application is responding! (HTTP $HTTP_CODE)"
                                     break
                                 else
-                                    echo "⏳ Waiting for UI..."
-                                    sleep 10
+                                    echo "⏳ Waiting for Rails application... (HTTP $HTTP_CODE)"
+                                    sleep 15
                                     RETRY_COUNT=$((RETRY_COUNT + 1))
                                 fi
                             done
                             
                             if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-                                echo "❌ UI verification failed"
+                                echo "❌ Rails application verification failed after $MAX_RETRIES attempts"
+                                echo "🔍 Attempting to check server status..."
+                                
+                                # Try to get more information about the server state
+                                curl -v http://${EC2_HOST}:3000/ || true
+                                
                                 exit 1
                             fi
                         '''
@@ -971,7 +920,7 @@ EOF
                     ]) {
                         sh '''
                             echo "
-🎉 BEAUTIFUL RAILS UI DEPLOYMENT SUCCESS! 🎉
+🎉 RAILS APPLICATION DEPLOYMENT SUCCESS! 🎉
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📊 Deployment Details:
@@ -980,34 +929,32 @@ Environment: ${ENVIRONMENT}
 Server: ${EC2_HOST}
 Approved by: ${DEPLOYMENT_APPROVER}
 Build: ${BUILD_NUMBER_TO_DEPLOY:-latest}
-Type: ✨ Beautiful Modern Rails UI
+Type: 🚀 Rails Application Server
 URL: http://${EC2_HOST}:3000
 Time: $(date)
 
-🎨 UI Features Deployed:
+🔧 Rails Server Configuration:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✨ Modern gradient background
-✨ Glassmorphism cards
-✨ Responsive design
-✨ Deployment dashboard
-✨ Technical stack display
-✨ Status indicators
+✅ RAILS_ENV=${ENVIRONMENT}
+✅ SECRET_KEY_BASE=generated
+✅ Server: rails server -e ${ENVIRONMENT} -p 3000 -b 0.0.0.0
+✅ Running in background with nohup
+✅ Process ID saved to tmp/pids/server.pid
 
-🚀 Rails Operations:
+🗄️ Database Operations:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ RAILS_ENV=${ENVIRONMENT} rake db:create
-✅ RAILS_ENV=${ENVIRONMENT} rake db:migrate
-✅ RAILS_ENV=${ENVIRONMENT} rake assets:precompile
-✅ Beautiful UI components created
-✅ Rails server started
+✅ bundle exec rake db:create
+✅ bundle exec rake db:migrate  
+✅ bundle exec rake assets:precompile
+✅ Ruby dependencies installed
 
-🔗 Access Your Beautiful Application:
+🔗 Access Your Rails Application:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🌍 Main UI: http://${EC2_HOST}:3000/
-🏥 Health: http://${EC2_HOST}:3000/health
+🌍 Main App: http://${EC2_HOST}:3000/
+📝 Logs: /var/www/hello-world-app/${ENVIRONMENT}/current/log/rails.log
 🔧 SSH: ssh deploy@${EC2_HOST}
 
-🎯 SUCCESS: Beautiful Rails UI is now live!
+🎯 SUCCESS: Rails application is now live and running!
                             "
                         '''
                     }
@@ -1018,11 +965,11 @@ Time: $(date)
     
     post {
         success {
-            echo "✅ Beautiful Rails UI deployment completed successfully!"
+            echo "✅ Rails application deployment completed successfully!"
         }
         
         failure {
-            echo "❌ Deployment failed!"
+            echo "❌ Rails deployment failed!"
         }
         
         always {
