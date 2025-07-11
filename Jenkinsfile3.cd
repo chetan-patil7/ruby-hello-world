@@ -134,7 +134,8 @@ Build: ${params.BUILD_NUMBER_TO_DEPLOY ?: 'latest'}
         stage('Download Artifact') {
             steps {
                 script {
-                    cleanWs()
+                    // Don't clean workspace - just clean old artifacts
+                    sh 'rm -f hello-world-app-*.tar.gz'
                     
                     def buildNumber = params.BUILD_NUMBER_TO_DEPLOY ?: ''
                     def ciJobName = 'hello-rails'
