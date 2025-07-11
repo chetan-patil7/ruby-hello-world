@@ -637,19 +637,16 @@ EOF
         
         echo "Configuring Rails environment..."
         
-        # Create staging environment config if it doesn't exist
         if [ ! -f "config/environments/{{ rails_env }}.rb" ]; then
           echo "Creating {{ rails_env }}.rb environment file..."
           cp config/environments/development.rb config/environments/{{ rails_env }}.rb
         fi
         
-        # Fix eager_load configuration
         if grep -q "config.eager_load.*nil" config/environments/{{ rails_env }}.rb; then
           echo "Fixing eager_load configuration..."
           sed -i 's/config.eager_load.*=.*nil/config.eager_load = false/' config/environments/{{ rails_env }}.rb
         fi
         
-        # Add eager_load setting if missing
         if ! grep -q "config.eager_load" config/environments/{{ rails_env }}.rb; then
           echo "Adding eager_load configuration..."
           echo "  config.eager_load = false" >> config/environments/{{ rails_env }}.rb
