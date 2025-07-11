@@ -755,7 +755,7 @@ EOF
           exit 1
         fi
         
-        if netstat -tlnp | grep :3000; then
+        if ss -tlnp | grep :3000 || lsof -i :3000 || curl -s -o /dev/null http://localhost:3000; then
           echo "Rails server is listening on port 3000"
           echo "Server accessible at: http://{{ ansible_host }}:3000"
         else
