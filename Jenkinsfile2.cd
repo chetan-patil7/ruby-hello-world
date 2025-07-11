@@ -737,7 +737,6 @@ EOF
         
         mkdir -p log tmp/pids
         
-        # Start Rails server with proper session and redirection
         setsid nohup bundle exec rails server -e {{ rails_env }} -p 3000 -b 0.0.0.0 </dev/null >log/rails.log 2>&1 &
         
         RAILS_PID=$!
@@ -746,10 +745,8 @@ EOF
         echo "Rails server started in background"
         echo "Process ID: $RAILS_PID"
         
-        # Give Rails more time to fully start
         sleep 20
         
-        # Check if the process is still running
         if kill -0 $RAILS_PID 2>/dev/null; then
           echo "Rails server process is still running"
         else
@@ -758,7 +755,6 @@ EOF
           exit 1
         fi
         
-        # Check if it's listening on the port
         if netstat -tlnp | grep :3000; then
           echo "Rails server is listening on port 3000"
           echo "Server accessible at: http://{{ ansible_host }}:3000"
