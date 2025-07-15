@@ -4,10 +4,9 @@
   become: yes
   vars:
     # ✅ ALTERNATIVE - use a different source variable
-    app_path: "{{ deploy_path | default('/var/www/hello-world-app') }}"
-    app_user: "{{ app_user | default('deploy') }}"
-    rails_env: "{{ rails_env | default('development') }}"
-    branch_name: "{{ branch_name | default('dev') }}"
+    app_user: "deploy"
+    app_path: "/var/www/hello-world-app"
+    rails_env: "staging1"
     
   tasks:
     - name: Display deployment information
