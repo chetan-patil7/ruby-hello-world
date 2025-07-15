@@ -84,17 +84,50 @@ pipeline {
 
         stage('Deploy with Ansible & Vault') {
             steps {
-                ansiblePlaybook(
-                    playbook: env.ANSIBLE_PLAYBOOK,
-                    inventory: env.ANSIBLE_INVENTORY,
-                    limit: env.ANSIBLE_LIMIT,
-                    extraVars: [
-                        rails_env: env.RAILS_ENV,
-                        branch_name: env.DETECTED_BRANCH
-                    ],
-                    vaultCredentialsId: env.ANSIBLE_VAULT_PASSWORD_ID,
-                    installation: 'ansible'  // This must match the name you configured in Jenkins
-                )
+                withCredentials([
+                    string(credentialsId: "${env.ANSIBLE_VAULT_PASSWORD_ID}", variable: 'VAULT_PASSWORD')
+                ]) {
+                    script {
+                        writeFile file: 'vault_pass.txt', text: VAULT_PASSWORD
+
+                        echo "🔐 Using Ansible Vault to decrypt sensitive vars"
+
+                        // IMPORTANT: This is a shell command, NOT the ansiblePlaybook plugin
+                        sh """
+                            # Add all possible Ansible paths to PATH
+                            export PATH="/Users/abcom/Library/Python/3.9/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
+                            
+                            # Debug: Show what's available
+                            echo "🔍 Debugging Ansible installation:"
+                            echo "Current PATH: \$PATH"
+                            echo "Looking for ansible-playbook..."
+                            which ansible-playbook || echo "ansible-playbook not found"
+                            
+                            # Try to find and use ansible-playbook
+                            if command -v ansible-playbook >/dev/null 2>&1; then
+                                echo "✅ Found ansible-playbook: \$(which ansible-playbook)"
+                                ansible-playbook --version
+                                
+                                # Run the deployment
+                                ansible-playbook -i ${env.ANSIBLE_INVENTORY} \
+                                                 --limit ${env.ANSIBLE_LIMIT} \
+                                                 --extra-vars "rails_env=${env.RAILS_ENV} branch_name=${env.DETECTED_BRANCH}" \
+                                                 --vault-password-file vault_pass.txt \
+                                                 ${env.ANSIBLE_PLAYBOOK}
+                            else
+                                echo "❌ ansible-playbook still not found after PATH update"
+                                echo "Let's check what's in the Python bin directory:"
+                                ls -la /Users/abcom/Library/Python/3.9/bin/ || echo "Directory doesn't exist"
+                                echo "Let's check Homebrew locations:"
+                                ls -la /opt/homebrew/bin/ansible* 2>/dev/null || echo "No Homebrew ansible"
+                                ls -la /usr/local/bin/ansible* 2>/dev/null || echo "No /usr/local ansible"
+                                exit 1
+                            fi
+                        """
+
+                        sh "rm -f vault_pass.txt"
+                    }
+                }
             }
         }
     }
