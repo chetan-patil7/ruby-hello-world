@@ -25,7 +25,19 @@
         group: "{{ app_user }}"
         mode: '0755'
     
-    # ✅ SIMPLE: Just deploy/update the code - no complex checks
+    # ✅ SOLUTION: Clean deployment approach
+    - name: Check if directory contains git repository
+      stat:
+        path: "{{ app_path }}/.git"
+      register: git_exists
+
+    - name: Remove existing content if not a git repository
+      shell: "rm -rf {{ app_path }}/* {{ app_path }}/.*"
+      args:
+        warn: false
+      when: not git_exists.stat.exists
+      ignore_errors: yes
+
     - name: Deploy latest code from repository
       git:
         repo: "{{ git_repo_url }}"
@@ -36,11 +48,11 @@
       become_user: "{{ app_user }}"
       register: git_result
 
-    # - name: Display deployment result
-    #   debug:
-    #     msg: "Code deployment completed. Changed: {{ git_result.changed }}"
+    - name: Display deployment result
+      debug:
+        msg: "Code deployment completed. Changed: {{ git_result.changed }}"
 
-    # # ✅ Install dependencies if Gemfile exists
+    # ✅ Install dependencies if Gemfile exists
     # - name: Install Ruby gems
     #   shell: "bundle install --deployment --without development test"
     #   args:
@@ -55,7 +67,7 @@
     #   debug:
     #     msg: "Bundle install completed: {{ bundle_result.changed | default('failed') }}"
     
-    # # ✅ Run Rails tasks if it's a Rails app
+    # ✅ Run Rails tasks if it's a Rails app
     - name: Run database migrations
       shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:migrate"
       args:
