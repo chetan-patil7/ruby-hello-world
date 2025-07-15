@@ -1,0 +1,126 @@
+pipeline {
+    agent any
+
+    environment {
+        DEV1_BRANCH = 'dev1'
+        DEV2_BRANCH = 'dev2'
+        DEV3_BRANCH = 'dev3'
+        STAGING1_BRANCH = 'staging1'
+
+        ANSIBLE_PLAYBOOK = 'ansible/deploy.yml'
+        ANSIBLE_VAULT_PASSWORD_ID = 'ansible_vault_password' // Jenkins secret text
+    }
+
+    stages {
+        stage('Checkout & Branch Detection') {
+            steps {
+                checkout scm
+                script {
+                    if (env.BRANCH_NAME) {
+                        env.DETECTED_BRANCH = env.BRANCH_NAME
+                    } else if (env.GIT_BRANCH) {
+                        env.DETECTED_BRANCH = env.GIT_BRANCH.replaceFirst(/^origin\//, '')
+                    } else {
+                        def branchName = sh(
+                            script: "git branch -r --contains HEAD | grep origin | head -1 | sed 's/.*origin\\///'",
+                            returnStdout: true
+                        ).trim()
+                        env.DETECTED_BRANCH = branchName
+                    }
+
+                    echo "✅ Detected branch: ${env.DETECTED_BRANCH}"
+                }
+            }
+        }
+
+        stage('Determine Target Server & Vault Group') {
+            steps {
+                script {
+                    switch(env.DETECTED_BRANCH) {
+                        case DEV1_BRANCH:
+                            env.TARGET_SERVER = 'dev1-server'
+                            env.RAILS_ENV = 'development1'
+                            env.ANSIBLE_LIMIT = 'dev1_servers'
+                            env.ANSIBLE_INVENTORY = 'inventory/dev/hosts'
+                            break
+                        case DEV2_BRANCH:
+                            env.TARGET_SERVER = 'dev2-server'
+                            env.RAILS_ENV = 'development2'
+                            env.ANSIBLE_LIMIT = 'dev2_servers'
+                            env.ANSIBLE_INVENTORY = 'inventory/dev/hosts'
+                            break
+                        case DEV3_BRANCH:
+                            env.TARGET_SERVER = 'dev3-server'
+                            env.RAILS_ENV = 'development3'
+                            env.ANSIBLE_LIMIT = 'dev3_servers'
+                            env.ANSIBLE_INVENTORY = 'inventory/dev/hosts'
+                            break
+                        case STAGING1_BRANCH:
+                            env.TARGET_SERVER = 'staging1-server'
+                            env.RAILS_ENV = 'staging1'
+                            env.ANSIBLE_LIMIT = 'staging1_servers'
+                            env.ANSIBLE_INVENTORY = 'inventory/staging/hosts'
+                            break
+                        default:
+                            error("❌ Branch '${env.DETECTED_BRANCH}' is not configured for deployment.")
+                    }
+
+                    echo "🚀 Deployment Configuration:"
+                    echo "Branch: ${env.DETECTED_BRANCH}"
+                    echo "Target server: ${env.TARGET_SERVER}"
+                    echo "Rails environment: ${env.RAILS_ENV}"
+                }
+            }
+        }
+
+        stage('Build & Test') {
+            steps {
+                script {
+                    echo "🧪 Running tests for ${env.DETECTED_BRANCH}"
+                    // Add your tests here
+                }
+            }
+        }
+
+        stage('Deploy with Ansible & Vault') {
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.ANSIBLE_VAULT_PASSWORD_ID}", variable: 'VAULT_PASSWORD')
+                ]) {
+                    script {
+                        writeFile file: 'vault_pass.txt', text: VAULT_PASSWORD
+
+                        echo "🔐 Using Ansible Vault to decrypt sensitive vars"
+
+                        sh """
+                            ansible-playbook -i ${env.ANSIBLE_INVENTORY} \
+                                             --limit ${env.ANSIBLE_LIMIT} \
+                                             --extra-vars "rails_env=${env.RAILS_ENV} \
+                                                           branch_name=${env.DETECTED_BRANCH}" \
+                                             --vault-password-file vault_pass.txt \
+                                             ${env.ANSIBLE_PLAYBOOK}
+                        """
+
+                        sh "rm -f vault_pass.txt"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            script {
+                echo "✅ SUCCESS: Branch '${env.DETECTED_BRANCH}' deployed to ${env.TARGET_SERVER}"
+            }
+        }
+        failure {
+            script {
+                echo "❌ FAILED: Deployment of '${env.DETECTED_BRANCH}' to ${env.TARGET_SERVER} failed"
+            }
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
