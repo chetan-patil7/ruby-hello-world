@@ -9,6 +9,8 @@ pipeline {
 
         ANSIBLE_PLAYBOOK = 'ansible/deploy.yml'
         ANSIBLE_VAULT_PASSWORD_ID = 'ansible_vault_password'
+        // Add your Git repository URL here
+        GIT_REPO_URL = 'https://github.com/chetan-patil7/ruby-hello-world.git'  // Replace with actual repo
     }
 
     stages {
@@ -85,25 +87,27 @@ pipeline {
         stage('Debug Inventory') {
             steps {
                 script {
-                    echo "🔍 Checking inventory files..."
+                    echo "🔍 Checking inventory and playbook files..."
                     sh """
-                        echo "Current directory: \$(pwd)"
-                        echo "Directory structure:"
-                        find . -name "*.yml" -o -name "hosts" -o -name "inventory" | head -20
+                        echo "✅ Found inventory file: ${env.ANSIBLE_INVENTORY}"
+                        echo "📖 Inventory content:"
+                        cat ${env.ANSIBLE_INVENTORY}
                         
-                        echo "\\n📁 Looking for inventory directory:"
-                        ls -la inventory/ || echo "❌ inventory/ directory not found"
+                        echo "\\n✅ Found playbook: ${env.ANSIBLE_PLAYBOOK}"
+                        echo "📖 Playbook content (first 50 lines):"
+                        head -50 ${env.ANSIBLE_PLAYBOOK}
                         
-                        echo "\\n📁 Looking for staging inventory:"
-                        ls -la inventory/staging/ || echo "❌ inventory/staging/ directory not found"
+                        echo "\\n🔍 Checking for ALL recursive variables:"
+                        echo "Looking for patterns like: variable_name.*variable_name"
+                        grep -r "\\([a-zA-Z_][a-zA-Z0-9_]*\\).*\\1.*default" ansible/ | grep -v "grep" || echo "No recursive variables found"
                         
-                        echo "\\n📄 Checking hosts file:"
-                        ls -la ${env.ANSIBLE_INVENTORY} || echo "❌ ${env.ANSIBLE_INVENTORY} not found"
+                        echo "\\n🔍 Specifically checking for self-referencing variables:"
+                        grep -r "app_user.*app_user" ansible/ || echo "No recursive app_user found"
+                        grep -r "app_path.*app_path" ansible/ || echo "No recursive app_path found"
+                        grep -r "rails_env.*rails_env" ansible/ || echo "No recursive rails_env found"
                         
-                        if [ -f "${env.ANSIBLE_INVENTORY}" ]; then
-                            echo "\\n📖 Content of ${env.ANSIBLE_INVENTORY}:"
-                            cat ${env.ANSIBLE_INVENTORY}
-                        fi
+                        echo "\\n🔍 Checking all vault files:"
+                        find ansible/ -name "vault.yml" -exec echo "=== {} ===" \\; -exec cat {} \\;
                     """
                 }
             }
@@ -157,11 +161,11 @@ pipeline {
                             echo "\\n🔍 Checking for staging1_servers group:"
                             ansible-inventory -i ${env.ANSIBLE_INVENTORY} --graph
                             
-                            # Run the deployment
+                            # Run the deployment with all required variables
                             echo "\\n🚀 Running deployment:"
                             ansible-playbook -i ${env.ANSIBLE_INVENTORY} \
                                              --limit ${env.ANSIBLE_LIMIT} \
-                                             --extra-vars "rails_env=${env.RAILS_ENV} branch_name=${env.DETECTED_BRANCH}" \
+                                             --extra-vars "rails_env=${env.RAILS_ENV} branch_name=${env.DETECTED_BRANCH} app_user=deploy app_path=/var/www/hello-world-app git_repo_url=${env.GIT_REPO_URL}" \
                                              --vault-password-file vault_pass.txt \
                                              -v \
                                              ${env.ANSIBLE_PLAYBOOK}
