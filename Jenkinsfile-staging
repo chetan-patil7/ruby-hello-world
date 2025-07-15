@@ -84,30 +84,17 @@ pipeline {
 
         stage('Deploy with Ansible & Vault') {
             steps {
-                withCredentials([
-                    string(credentialsId: "${env.ANSIBLE_VAULT_PASSWORD_ID}", variable: 'VAULT_PASSWORD')
-                ]) {
-                    script {
-                        writeFile file: 'vault_pass.txt', text: VAULT_PASSWORD
-
-                        echo "🔐 Using Ansible Vault to decrypt sensitive vars"
-
-                        // Using Jenkins Ansible Plugin
-                        ansiblePlaybook(
-                            playbook: env.ANSIBLE_PLAYBOOK,
-                            inventory: env.ANSIBLE_INVENTORY,
-                            limit: env.ANSIBLE_LIMIT,
-                            extraVars: [
-                                rails_env: env.RAILS_ENV,
-                                branch_name: env.DETECTED_BRANCH
-                            ],
-                            vaultCredentialsId: env.ANSIBLE_VAULT_PASSWORD_ID,
-                            installation: 'ansible' // This should match your Ansible installation name in Jenkins
-                        )
-
-                        sh "rm -f vault_pass.txt"
-                    }
-                }
+                ansiblePlaybook(
+                    playbook: env.ANSIBLE_PLAYBOOK,
+                    inventory: env.ANSIBLE_INVENTORY,
+                    limit: env.ANSIBLE_LIMIT,
+                    extraVars: [
+                        rails_env: env.RAILS_ENV,
+                        branch_name: env.DETECTED_BRANCH
+                    ],
+                    vaultCredentialsId: env.ANSIBLE_VAULT_PASSWORD_ID,
+                    installation: 'ansible'  // This must match the name you configured in Jenkins
+                )
             }
         }
     }
