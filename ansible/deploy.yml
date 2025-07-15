@@ -25,18 +25,26 @@
         group: "{{ app_user }}"
         mode: '0755'
     
-    # ✅ SOLUTION: Clean deployment approach
+    # ✅ SOLUTION: Complete directory reset for clean deployment
     - name: Check if directory contains git repository
       stat:
         path: "{{ app_path }}/.git"
       register: git_exists
 
-    - name: Remove existing content if not a git repository
-      shell: "rm -rf {{ app_path }}/* {{ app_path }}/.*"
-      args:
-        warn: false
+    - name: Remove entire application directory if not a git repository
+      file:
+        path: "{{ app_path }}"
+        state: absent
       when: not git_exists.stat.exists
-      ignore_errors: yes
+
+    - name: Recreate application directory
+      file:
+        path: "{{ app_path }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+      when: not git_exists.stat.exists
 
     - name: Deploy latest code from repository
       git:
@@ -53,19 +61,19 @@
         msg: "Code deployment completed. Changed: {{ git_result.changed }}"
 
     # ✅ Install dependencies if Gemfile exists
-    # - name: Install Ruby gems
-    #   shell: "bundle install --deployment --without development test"
-    #   args:
-    #     chdir: "{{ app_path }}"
-    #   become_user: "{{ app_user }}"
-    #   environment:
-    #     RAILS_ENV: "{{ rails_env }}"
-    #   ignore_errors: yes
-    #   register: bundle_result
+    - name: Install Ruby gems
+      shell: "bundle install --deployment --without development test"
+      args:
+        chdir: "{{ app_path }}"
+      become_user: "{{ app_user }}"
+      environment:
+        RAILS_ENV: "{{ rails_env }}"
+      ignore_errors: yes
+      register: bundle_result
       
-    # - name: Display bundle install result
-    #   debug:
-    #     msg: "Bundle install completed: {{ bundle_result.changed | default('failed') }}"
+    - name: Display bundle install result
+      debug:
+        msg: "Bundle install completed: {{ bundle_result.changed | default('failed') }}"
     
     # ✅ Run Rails tasks if it's a Rails app
     - name: Run database migrations
