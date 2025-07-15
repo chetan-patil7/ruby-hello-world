@@ -19,74 +19,79 @@
           Git Repo: {{ git_repo_url }}
           Deploy Type: {{ deploy_type | default('UNKNOWN') }}
           
-    - name: Remove application directory completely
-      file:
+    - name: Check if application directory exists
+      stat:
         path: "{{ app_path }}"
-        state: absent
+      register: app_dir
 
-    - name: Create fresh application directory
+    - name: Ensure application directory exists
       file:
         path: "{{ app_path }}"
         state: directory
         owner: "{{ app_user }}"
         group: "{{ app_user }}"
         mode: '0755'
+      when: not app_dir.stat.exists
     
-    - name: Deploy latest code from repository (clean slate)
+    - name: Pull latest code from repository
       git:
         repo: "{{ git_repo_url }}"
         dest: "{{ app_path }}"
         version: "{{ branch_name }}"
         force: yes
+        update: yes
       become_user: "{{ app_user }}"
       register: git_result
 
-    # - name: Display deployment result
-    #   debug:
-    #     msg: "✅ Code deployment completed. Changed: {{ git_result.changed }}"
-
-    # - name: Check if Gemfile exists
-    #   stat:
-    #     path: "{{ app_path }}/Gemfile"
-    #   register: gemfile_exists
-
-    # - name: Install Ruby gems
-    #   shell: "bundle install --deployment --without development test"
-    #   args:
-    #     chdir: "{{ app_path }}"
-    #   become_user: "{{ app_user }}"
-    #   environment:
-    #     RAILS_ENV: "{{ rails_env }}"
-    #   when: gemfile_exists.stat.exists
-    #   register: bundle_result
-      
-    # - name: Display bundle install result
-    #   debug:
-    #     msg: "📦 Bundle install completed: {{ bundle_result.changed | default('skipped - no Gemfile') }}"
+    - name: Display deployment result
+      debug:
+        msg: |
+          ✅ Code deployment completed
+          Changed: {{ git_result.changed }}
+          {% if git_result.changed %}
+          Before: {{ git_result.before | default('N/A') }}
+          After: {{ git_result.after | default('N/A') }}
+          {% else %}
+          No changes detected - already up to date
+          {% endif %}
     
-    - name: Run database migrations
+    - name: Run database migrations (if needed)
       shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:migrate"
       args:
         chdir: "{{ app_path }}"
       become_user: "{{ app_user }}"
       ignore_errors: yes
       register: migration_result
+      when: git_result.changed
       
     - name: Display migration result
       debug:
-        msg: "🗃️ Database migration completed: {{ migration_result.changed | default('failed') }}"
+        msg: |
+          🗃️ Database migrations: 
+          {% if git_result.changed %}
+          Status: {{ 'SUCCESS' if migration_result.rc == 0 else 'FAILED' }}
+          {% else %}
+          SKIPPED - No code changes detected
+          {% endif %}
     
-    - name: Precompile assets
+    - name: Precompile assets (if code changed)
       shell: "RAILS_ENV={{ rails_env }} bundle exec rake assets:precompile"
       args:
         chdir: "{{ app_path }}"
       become_user: "{{ app_user }}"
       ignore_errors: yes
       register: assets_result
+      when: git_result.changed
       
     - name: Display assets compilation result
       debug:
-        msg: "🎨 Assets precompilation completed: {{ assets_result.changed | default('failed') }}"
+        msg: |
+          🎨 Assets precompilation: 
+          {% if git_result.changed %}
+          Status: {{ 'SUCCESS' if assets_result.rc == 0 else 'FAILED' }}
+          {% else %}
+          SKIPPED - No code changes detected
+          {% endif %}
     
     - name: Set proper permissions
       file:
@@ -94,17 +99,25 @@
         owner: "{{ app_user }}"
         group: "{{ app_user }}"
         recurse: yes
+      when: git_result.changed
     
-    - name: Restart Apache service
+    - name: Restart Apache service (if code changed)
       service:
         name: apache2
         state: restarted
       ignore_errors: yes
       register: apache_result
+      when: git_result.changed
 
     - name: Display Apache restart result
       debug:
-        msg: "🌐 Apache restart completed: {{ apache_result.changed | default('failed') }}"
+        msg: |
+          🌐 Apache service: 
+          {% if git_result.changed %}
+          Status: {{ 'RESTARTED' if apache_result.changed else 'FAILED TO RESTART' }}
+          {% else %}
+          SKIPPED - No code changes detected
+          {% endif %}
 
     - name: Deployment Summary
       debug:
@@ -114,8 +127,10 @@
           Environment: {{ rails_env }}
           Branch: {{ branch_name }}
           Deploy Type: {{ deploy_type | default('UNKNOWN') }}
-          Git Status: {% if git_result is defined and git_result.changed %}SUCCESS{% else %}PARTIAL{% endif %}
-          Bundle Status: {% if bundle_result is defined and bundle_result.changed %}SUCCESS{% elif bundle_result is defined %}FAILED{% else %}SKIPPED{% endif %}
+          Git Status: {% if git_result.changed %}NEW CHANGES DEPLOYED{% else %}NO CHANGES - UP TO DATE{% endif %}
+          Migration Status: {% if git_result.changed %}{{ 'SUCCESS' if migration_result.rc == 0 else 'FAILED' }}{% else %}SKIPPED{% endif %}
+          Assets Status: {% if git_result.changed %}{{ 'SUCCESS' if assets_result.rc == 0 else 'FAILED' }}{% else %}SKIPPED{% endif %}
+          Apache Status: {% if git_result.changed %}{{ 'RESTARTED' if apache_result.changed else 'FAILED' }}{% else %}SKIPPED{% endif %}
   
   handlers:
     - name: check apache status
