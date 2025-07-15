@@ -41,25 +41,25 @@ pipeline {
                             env.TARGET_SERVER = 'dev1-server'
                             env.RAILS_ENV = 'development1'
                             env.ANSIBLE_LIMIT = 'dev1_servers'
-                            env.ANSIBLE_INVENTORY = 'inventory/dev/hosts'
+                            env.ANSIBLE_INVENTORY = 'ansible/inventory/dev/hosts'
                             break
                         case DEV2_BRANCH:
                             env.TARGET_SERVER = 'dev2-server'
                             env.RAILS_ENV = 'development2'
                             env.ANSIBLE_LIMIT = 'dev2_servers'
-                            env.ANSIBLE_INVENTORY = 'inventory/dev/hosts'
+                            env.ANSIBLE_INVENTORY = 'ansible/inventory/dev/hosts'
                             break
                         case DEV3_BRANCH:
                             env.TARGET_SERVER = 'dev3-server'
                             env.RAILS_ENV = 'development3'
                             env.ANSIBLE_LIMIT = 'dev3_servers'
-                            env.ANSIBLE_INVENTORY = 'inventory/dev/hosts'
+                            env.ANSIBLE_INVENTORY = 'ansible/inventory/dev/hosts'
                             break
                         case STAGING1_BRANCH:
                             env.TARGET_SERVER = 'staging1-server'
                             env.RAILS_ENV = 'staging1'
                             env.ANSIBLE_LIMIT = 'staging1_servers'
-                            env.ANSIBLE_INVENTORY = 'inventory/staging/hosts'
+                            env.ANSIBLE_INVENTORY = 'ansible/inventory/staging/hosts'
                             break
                         default:
                             error("❌ Branch '${env.DETECTED_BRANCH}' is not configured for deployment.")
