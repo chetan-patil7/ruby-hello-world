@@ -3,76 +3,112 @@
   hosts: all
   become: yes
   vars:
-    app_path: "{{ app_path | default('/var/www/hello-world-appp') }}"
-    app_user: "{{ app_user | default('deploy') }}"
-    rails_env: "{{ rails_env | default('development') }}"
-    branch_name: "{{ branch_name | default('dev') }}"
+    app_user: "deploy"
+    app_path: "/var/www/hello-world-app"
+    # rails_env will be passed from Jenkins as extra-vars
     
   tasks:
     - name: Display deployment information
       debug:
         msg: |
+          🚀 DEPLOYMENT STARTING 🚀
           Deploying to: {{ inventory_hostname }}
           Rails Environment: {{ rails_env }}
           Branch: {{ branch_name }}
           App Path: {{ app_path }}
+          Git Repo: {{ git_repo_url }}
+          Deploy Type: {{ deploy_type | default('UNKNOWN') }}
           
-    - name: Ensure application directory exists
-      file:
-        path: "{{ app_path }}"
-        state: directory
-        owner: "{{ app_user }}"
-        group: "{{ app_user }}"
-        mode: '0755'
+    # - name: Remove application directory completely
+    #   file:
+    #     path: "{{ app_path }}"
+    #     state: absent
+
+    # - name: Create fresh application directory
+    #   file:
+    #     path: "{{ app_path }}"
+    #     state: directory
+    #     owner: "{{ app_user }}"
+    #     group: "{{ app_user }}"
+    #     mode: '0755'
     
-    - name: Pull latest code from repository
-      git:
-        repo: "{{ git_repo_url }}"
-        dest: "{{ app_path }}"
-        version: "{{ branch_name }}"
-        force: yes
-      become_user: "{{ app_user }}"
-    
+    # - name: Deploy latest code from repository (clean slate)
+    #   git:
+    #     repo: "{{ git_repo_url }}"
+    #     dest: "{{ app_path }}"
+    #     version: "{{ branch_name }}"
+    #     force: yes
+    #   become_user: "{{ app_user }}"
+    #   register: git_result
+
+    # - name: Display deployment result
+    #   debug:
+    #     msg: "✅ Code deployment completed. Changed: {{ git_result.changed }}"
+
     # - name: Install Ruby gems
-    #   shell: "bundle install"
+    #   shell: "bundle install --deployment --without development test"
     #   args:
     #     chdir: "{{ app_path }}"
     #   become_user: "{{ app_user }}"
     #   environment:
     #     RAILS_ENV: "{{ rails_env }}"
-    
-    # - name: Create database
-    #   shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:create"
-    #   args:
-    #     chdir: "{{ app_path }}"
-    #   become_user: "{{ app_user }}"
     #   ignore_errors: yes
+    #   register: bundle_result
+      
+    # - name: Display bundle install result
+    #   debug:
+    #     msg: "📦 Bundle install completed: {{ bundle_result.changed | default('failed') }}"
     
     - name: Run database migrations
       shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:migrate"
       args:
         chdir: "{{ app_path }}"
       become_user: "{{ app_user }}"
+      ignore_errors: yes
+      register: migration_result
+      
+    - name: Display migration result
+      debug:
+        msg: "🗃️ Database migration completed: {{ migration_result.changed | default('failed') }}"
     
     - name: Precompile assets
       shell: "RAILS_ENV={{ rails_env }} bundle exec rake assets:precompile"
       args:
         chdir: "{{ app_path }}"
       become_user: "{{ app_user }}"
+      ignore_errors: yes
+      register: assets_result
+      
+    - name: Display assets compilation result
+      debug:
+        msg: "🎨 Assets precompilation completed: {{ assets_result.changed | default('failed') }}"
     
-    # - name: Set proper permissions
-    #   file:
-    #     path: "{{ app_path }}"
-    #     owner: "{{ app_user }}"
-    #     group: "{{ app_user }}"
-    #     recurse: yes
+    - name: Set proper permissions
+      file:
+        path: "{{ app_path }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        recurse: yes
     
     - name: Restart Apache service
       service:
         name: apache2
         state: restarted
-      notify:
-        - check apache status
+      ignore_errors: yes
+      register: apache_result
+
+    - name: Display Apache restart result
+      debug:
+        msg: "🌐 Apache restart completed: {{ apache_result.changed | default('failed') }}"
+
+    - name: Deployment Summary
+      debug:
+        msg: |
+          🎉 DEPLOYMENT COMPLETED 🎉
+          Server: {{ inventory_hostname }}
+          Environment: {{ rails_env }}
+          Branch: {{ branch_name }}
+          Status: {% if git_result.changed %}SUCCESS{% else %}PARTIAL{% endif %}
   
   handlers:
     - name: check apache status

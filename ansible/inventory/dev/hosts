@@ -1,30 +1,19 @@
-# Development Environment Inventory
+# ansible/inventory/dev/hosts
 
 [dev1_servers]
-dev1-server ansible_host=192.168.1.101 ansible_user=deploy
+dev1-server ansible_host=54.210.171.180 ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
 
 [dev2_servers]
-dev2-server ansible_host=192.168.1.102 ansible_user=deploy
+dev2-server ansible_host=YOUR_DEV2_SERVER_IP ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
 
 [dev3_servers]
-dev3-server ansible_host=192.168.1.103 ansible_user=deploy
+dev3-server ansible_host=YOUR_DEV3_SERVER_IP ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
 
-[dev1_servers:vars]
-git_repo_url=https://github.com/your-org/your-rails-app.git
-app_path=/var/www/rails_app_dev1
-app_user=deploy
-
-[dev2_servers:vars]
-git_repo_url=https://github.com/your-org/your-rails-app.git
-app_path=/var/www/rails_app_dev2
-app_user=deploy
-
-[dev3_servers:vars]
-git_repo_url=https://github.com/your-org/your-rails-app.git
-app_path=/var/www/rails_app_dev3
-app_user=deploy
-
-[all_dev_servers:children]
+[dev_servers:children]
 dev1_servers
 dev2_servers
 dev3_servers
+
+[dev_servers:vars]
+ansible_python_interpreter=/usr/bin/python3
+rails_env=development
