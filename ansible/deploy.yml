@@ -41,28 +41,28 @@
       become_user: "{{ app_user }}"
       register: git_result
 
-    - name: Display deployment result
-      debug:
-        msg: "✅ Code deployment completed. Changed: {{ git_result.changed }}"
+    # - name: Display deployment result
+    #   debug:
+    #     msg: "✅ Code deployment completed. Changed: {{ git_result.changed }}"
 
-    - name: Check if Gemfile exists
-      stat:
-        path: "{{ app_path }}/Gemfile"
-      register: gemfile_exists
+    # - name: Check if Gemfile exists
+    #   stat:
+    #     path: "{{ app_path }}/Gemfile"
+    #   register: gemfile_exists
 
-    - name: Install Ruby gems
-      shell: "bundle install --deployment --without development test"
-      args:
-        chdir: "{{ app_path }}"
-      become_user: "{{ app_user }}"
-      environment:
-        RAILS_ENV: "{{ rails_env }}"
-      when: gemfile_exists.stat.exists
-      register: bundle_result
+    # - name: Install Ruby gems
+    #   shell: "bundle install --deployment --without development test"
+    #   args:
+    #     chdir: "{{ app_path }}"
+    #   become_user: "{{ app_user }}"
+    #   environment:
+    #     RAILS_ENV: "{{ rails_env }}"
+    #   when: gemfile_exists.stat.exists
+    #   register: bundle_result
       
-    - name: Display bundle install result
-      debug:
-        msg: "📦 Bundle install completed: {{ bundle_result.changed | default('skipped - no Gemfile') }}"
+    # - name: Display bundle install result
+    #   debug:
+    #     msg: "📦 Bundle install completed: {{ bundle_result.changed | default('skipped - no Gemfile') }}"
     
     - name: Run database migrations
       shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:migrate"
