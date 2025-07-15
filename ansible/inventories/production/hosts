@@ -1,12 +1,10 @@
 [webservers]
-production-server ansible_host=YOUR_PROD_IP ansible_user=deploy
+production-server ansible_host=YOUR_PRODUCTION_EC2_IP ansible_user=deploy
 
 [all:vars]
 ansible_ssh_private_key_file=~/.ssh/deploy_key
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
 rails_env=production
 app_name=hello-world-app
 deploy_user=deploy
 deploy_path=/var/www/hello-world-app
-database_name=hello_world_app_production
-database_user=deploy
-database_password=deploy123

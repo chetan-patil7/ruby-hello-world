@@ -1,4 +1,0 @@
-env: dev
-ansible_user: ubuntu
-app_port: 3000
-debug: true

@@ -38,3 +38,8 @@
 ansible/extra_vars.yml
 ansible/user_vars.yml
 *.retry
+
+# Ansible
+ansible/extra_vars.yml
+ansible/user_vars.yml
+*.retry
