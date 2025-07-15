@@ -162,12 +162,14 @@ pipeline {
     post {
         always {
             script {
-                // Clean up test database
-                sh '''
-                    export PATH="$HOME/.rbenv/bin:$PATH"
-                    eval "$(rbenv init -)"
-                    RAILS_ENV=test bundle exec rake db:drop || true
-                '''
+                node {
+                    // Clean up test database
+                    sh '''
+                        export PATH="$HOME/.rbenv/bin:$PATH"
+                        eval "$(rbenv init -)"
+                        RAILS_ENV=test bundle exec rake db:drop || true
+                    '''
+                }
             }
             
             // Clean workspace but keep artifacts
