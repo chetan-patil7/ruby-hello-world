@@ -159,12 +159,12 @@ pipeline {
 //                                 exit 1
 //                             }
                             
-                            # Check if the group exists
-                            echo "\\n🔍 Checking for staging1_servers group:"
-                            ansible-inventory -i ${env.ANSIBLE_INVENTORY} --graph
+                            // # Check if the group exists
+                            // echo "\\n🔍 Checking for staging1_servers group:"
+                            // ansible-inventory -i ${env.ANSIBLE_INVENTORY} --graph
                             
-                            # Run the deployment
-                            echo "\\n🚀 Running deployment:"
+                            // # Run the deployment
+                            sh """ echo "\\n🚀 Running deployment:"
                             ansible-playbook -i ${env.ANSIBLE_INVENTORY} \
                                              --limit ${env.ANSIBLE_LIMIT} \
                                              --extra-vars "rails_env=${env.RAILS_ENV} branch_name=${env.DETECTED_BRANCH}" \
