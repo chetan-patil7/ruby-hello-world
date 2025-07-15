@@ -43,3 +43,4 @@ ansible/user_vars.yml
 ansible/extra_vars.yml
 ansible/user_vars.yml
 *.retry
+ansible/deploy.sh

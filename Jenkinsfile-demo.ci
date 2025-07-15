@@ -1,0 +1,316 @@
+pipeline {
+    agent any
+    
+    environment {
+        // Define server configurations
+        DEV1_BRANCH = 'dev1'
+        DEV2_BRANCH = 'dev2'
+        DEV3_BRANCH = 'dev3'
+        STAGING1_BRANCH = 'staging1'
+        STAGING2_BRANCH = 'staging2'
+        STAGING3_BRANCH = 'staging3'
+        
+        // Ansible playbook
+        ANSIBLE_PLAYBOOK = 'deploy.yml'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.BRANCH_NAME = sh(returnStdout: true, script: 'git rev-parse --abbrev-ref HEAD').trim()
+                    echo "Current branch: ${env.BRANCH_NAME}"
+                }
+            }
+        }
+        
+        stage('Determine Target Server & Load Credentials') {
+            steps {
+                script {
+                    // Map branch to server, environment, and credentials
+                    switch(env.BRANCH_NAME) {
+                        // Development servers
+                        case DEV1_BRANCH:
+                            env.TARGET_SERVER = 'dev1-server'
+                            env.RAILS_ENV = 'development1'
+                            env.ANSIBLE_LIMIT = 'dev1_servers'
+                            env.ANSIBLE_INVENTORY = 'inventory/dev/hosts'
+                            env.ENVIRONMENT_TYPE = 'development'
+                            env.DB_CREDS_ID = 'dev1-db-credentials'
+                            env.SSH_KEY_ID = 'dev1-ssh-key'
+                            break
+                        case DEV2_BRANCH:
+                            env.TARGET_SERVER = 'dev2-server'
+                            env.RAILS_ENV = 'development2'
+                            env.ANSIBLE_LIMIT = 'dev2_servers'
+                            env.ANSIBLE_INVENTORY = 'inventory/dev/hosts'
+                            env.ENVIRONMENT_TYPE = 'development'
+                            env.DB_CREDS_ID = 'dev2-db-credentials'
+                            env.SSH_KEY_ID = 'dev2-ssh-key'
+                            break
+                        case DEV3_BRANCH:
+                            env.TARGET_SERVER = 'dev3-server'
+                            env.RAILS_ENV = 'development3'
+                            env.ANSIBLE_LIMIT = 'dev3_servers'
+                            env.ANSIBLE_INVENTORY = 'inventory/dev/hosts'
+                            env.ENVIRONMENT_TYPE = 'development'
+                            env.DB_CREDS_ID = 'dev3-db-credentials'
+                            env.SSH_KEY_ID = 'dev3-ssh-key'
+                            break
+                        
+                        // Staging servers
+                        case STAGING1_BRANCH:
+                            env.TARGET_SERVER = 'staging1-server'
+                            env.RAILS_ENV = 'staging1'
+                            env.ANSIBLE_LIMIT = 'staging1_servers'
+                            env.ANSIBLE_INVENTORY = 'inventory/staging/hosts'
+                            env.ENVIRONMENT_TYPE = 'staging'
+                            env.DB_CREDS_ID = 'staging1-db-credentials'
+                            env.SSH_KEY_ID = 'staging1-ssh-key'
+                            break
+                        case STAGING2_BRANCH:
+                            env.TARGET_SERVER = 'staging2-server'
+                            env.RAILS_ENV = 'staging2'
+                            env.ANSIBLE_LIMIT = 'staging2_servers'
+                            env.ANSIBLE_INVENTORY = 'inventory/staging/hosts'
+                            env.ENVIRONMENT_TYPE = 'staging'
+                            env.DB_CREDS_ID = 'staging2-db-credentials'
+                            env.SSH_KEY_ID = 'staging2-ssh-key'
+                            break
+                        case STAGING3_BRANCH:
+                            env.TARGET_SERVER = 'staging3-server'
+                            env.RAILS_ENV = 'staging3'
+                            env.ANSIBLE_LIMIT = 'staging3_servers'
+                            env.ANSIBLE_INVENTORY = 'inventory/staging/hosts'
+                            env.ENVIRONMENT_TYPE = 'staging'
+                            env.DB_CREDS_ID = 'staging3-db-credentials'
+                            env.SSH_KEY_ID = 'staging3-ssh-key'
+                            break
+                        
+                        default:
+                            error("Branch ${env.BRANCH_NAME} is not configured for deployment")
+                    }
+                    echo "Target server: ${env.TARGET_SERVER}"
+                    echo "Rails environment: ${env.RAILS_ENV}"
+                    echo "Environment type: ${env.ENVIRONMENT_TYPE}"
+                    echo "Using credentials: ${env.DB_CREDS_ID}"
+                }
+            }
+        }
+        
+        stage('Build & Test') {
+            steps {
+                script {
+                    echo "Running tests for ${env.BRANCH_NAME}"
+                    // Add your build and test steps here
+                }
+            }
+        }
+        
+        stage('Deploy to Server') {
+            steps {
+                // Method 1: Using Jenkins credentials with withCredentials block
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: env.DB_CREDS_ID,
+                        usernameVariable: 'DB_USERNAME',
+                        passwordVariable: 'DB_PASSWORD'
+                    ),
+                    string(
+                        credentialsId: "${env.TARGET_SERVER}-db-name",
+                        variable: 'DB_NAME'
+                    ),
+                    string(
+                        credentialsId: "${env.TARGET_SERVER}-db-host",
+                        variable: 'DB_HOST'
+                    ),
+                    sshUserPrivateKey(
+                        credentialsId: env.SSH_KEY_ID,
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    script {
+                        // Deploy using Ansible with credentials from Jenkins
+                        sh """
+                            ansible-playbook -i ${env.ANSIBLE_INVENTORY} \
+                                           --limit ${env.ANSIBLE_LIMIT} \
+                                           --private-key \${SSH_KEY_FILE} \
+                                           --extra-vars "rails_env=${env.RAILS_ENV} \
+                                                        branch_name=${env.BRANCH_NAME} \
+                                                        environment_type=${env.ENVIRONMENT_TYPE} \
+                                                        db_username=\${DB_USERNAME} \
+                                                        db_password=\${DB_PASSWORD} \
+                                                        db_name=\${DB_NAME} \
+                                                        db_host=\${DB_HOST}" \
+                                           ${ANSIBLE_PLAYBOOK}
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to All Dev Servers') {
+            when {
+                anyOf {
+                    branch 'dev-deploy-all'
+                    expression { params.DEPLOY_ALL_DEV == true }
+                }
+            }
+            parallel {
+                stage('Deploy to Dev1') {
+                    steps {
+                        withCredentials([
+                            usernamePassword(credentialsId: 'dev1-db-credentials', usernameVariable: 'DB_USERNAME', passwordVariable: 'DB_PASSWORD'),
+                            string(credentialsId: 'dev1-server-db-name', variable: 'DB_NAME'),
+                            string(credentialsId: 'dev1-server-db-host', variable: 'DB_HOST'),
+                            sshUserPrivateKey(credentialsId: 'dev1-ssh-key', keyFileVariable: 'SSH_KEY_FILE')
+                        ]) {
+                            sh """
+                                ansible-playbook -i inventory/dev/hosts \
+                                               --limit dev1_servers \
+                                               --private-key \${SSH_KEY_FILE} \
+                                               --extra-vars "rails_env=development1 branch_name=dev1 environment_type=development db_username=\${DB_USERNAME} db_password=\${DB_PASSWORD} db_name=\${DB_NAME} db_host=\${DB_HOST}" \
+                                               ${ANSIBLE_PLAYBOOK}
+                            """
+                        }
+                    }
+                }
+                stage('Deploy to Dev2') {
+                    steps {
+                        withCredentials([
+                            usernamePassword(credentialsId: 'dev2-db-credentials', usernameVariable: 'DB_USERNAME', passwordVariable: 'DB_PASSWORD'),
+                            string(credentialsId: 'dev2-server-db-name', variable: 'DB_NAME'),
+                            string(credentialsId: 'dev2-server-db-host', variable: 'DB_HOST'),
+                            sshUserPrivateKey(credentialsId: 'dev2-ssh-key', keyFileVariable: 'SSH_KEY_FILE')
+                        ]) {
+                            sh """
+                                ansible-playbook -i inventory/dev/hosts \
+                                               --limit dev2_servers \
+                                               --private-key \${SSH_KEY_FILE} \
+                                               --extra-vars "rails_env=development2 branch_name=dev2 environment_type=development db_username=\${DB_USERNAME} db_password=\${DB_PASSWORD} db_name=\${DB_NAME} db_host=\${DB_HOST}" \
+                                               ${ANSIBLE_PLAYBOOK}
+                            """
+                        }
+                    }
+                }
+                stage('Deploy to Dev3') {
+                    steps {
+                        withCredentials([
+                            usernamePassword(credentialsId: 'dev3-db-credentials', usernameVariable: 'DB_USERNAME', passwordVariable: 'DB_PASSWORD'),
+                            string(credentialsId: 'dev3-server-db-name', variable: 'DB_NAME'),
+                            string(credentialsId: 'dev3-server-db-host', variable: 'DB_HOST'),
+                            sshUserPrivateKey(credentialsId: 'dev3-ssh-key', keyFileVariable: 'SSH_KEY_FILE')
+                        ]) {
+                            sh """
+                                ansible-playbook -i inventory/dev/hosts \
+                                               --limit dev3_servers \
+                                               --private-key \${SSH_KEY_FILE} \
+                                               --extra-vars "rails_env=development3 branch_name=dev3 environment_type=development db_username=\${DB_USERNAME} db_password=\${DB_PASSWORD} db_name=\${DB_NAME} db_host=\${DB_HOST}" \
+                                               ${ANSIBLE_PLAYBOOK}
+                            """
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to All Staging Servers') {
+            when {
+                anyOf {
+                    branch 'staging-deploy-all'
+                    expression { params.DEPLOY_ALL_STAGING == true }
+                }
+            }
+            parallel {
+                stage('Deploy to Staging1') {
+                    steps {
+                        withCredentials([
+                            usernamePassword(credentialsId: 'staging1-db-credentials', usernameVariable: 'DB_USERNAME', passwordVariable: 'DB_PASSWORD'),
+                            string(credentialsId: 'staging1-server-db-name', variable: 'DB_NAME'),
+                            string(credentialsId: 'staging1-server-db-host', variable: 'DB_HOST'),
+                            sshUserPrivateKey(credentialsId: 'staging1-ssh-key', keyFileVariable: 'SSH_KEY_FILE')
+                        ]) {
+                            sh """
+                                ansible-playbook -i inventory/staging/hosts \
+                                               --limit staging1_servers \
+                                               --private-key \${SSH_KEY_FILE} \
+                                               --extra-vars "rails_env=staging1 branch_name=staging1 environment_type=staging db_username=\${DB_USERNAME} db_password=\${DB_PASSWORD} db_name=\${DB_NAME} db_host=\${DB_HOST}" \
+                                               ${ANSIBLE_PLAYBOOK}
+                            """
+                        }
+                    }
+                }
+                stage('Deploy to Staging2') {
+                    steps {
+                        withCredentials([
+                            usernamePassword(credentialsId: 'staging2-db-credentials', usernameVariable: 'DB_USERNAME', passwordVariable: 'DB_PASSWORD'),
+                            string(credentialsId: 'staging2-server-db-name', variable: 'DB_NAME'),
+                            string(credentialsId: 'staging2-server-db-host', variable: 'DB_HOST'),
+                            sshUserPrivateKey(credentialsId: 'staging2-ssh-key', keyFileVariable: 'SSH_KEY_FILE')
+                        ]) {
+                            sh """
+                                ansible-playbook -i inventory/staging/hosts \
+                                               --limit staging2_servers \
+                                               --private-key \${SSH_KEY_FILE} \
+                                               --extra-vars "rails_env=staging2 branch_name=staging2 environment_type=staging db_username=\${DB_USERNAME} db_password=\${DB_PASSWORD} db_name=\${DB_NAME} db_host=\${DB_HOST}" \
+                                               ${ANSIBLE_PLAYBOOK}
+                            """
+                        }
+                    }
+                }
+                stage('Deploy to Staging3') {
+                    steps {
+                        withCredentials([
+                            usernamePassword(credentialsId: 'staging3-db-credentials', usernameVariable: 'DB_USERNAME', passwordVariable: 'DB_PASSWORD'),
+                            string(credentialsId: 'staging3-server-db-name', variable: 'DB_NAME'),
+                            string(credentialsId: 'staging3-server-db-host', variable: 'DB_HOST'),
+                            sshUserPrivateKey(credentialsId: 'staging3-ssh-key', keyFileVariable: 'SSH_KEY_FILE')
+                        ]) {
+                            sh """
+                                ansible-playbook -i inventory/staging/hosts \
+                                               --limit staging3_servers \
+                                               --private-key \${SSH_KEY_FILE} \
+                                               --extra-vars "rails_env=staging3 branch_name=staging3 environment_type=staging db_username=\${DB_USERNAME} db_password=\${DB_PASSWORD} db_name=\${DB_NAME} db_host=\${DB_HOST}" \
+                                               ${ANSIBLE_PLAYBOOK}
+                            """
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "Deployment completed successfully to ${env.TARGET_SERVER}"
+            // Optional: Send notifications
+        }
+        failure {
+            echo "Deployment failed"
+            // Optional: Send failure notifications
+        }
+        always {
+            cleanWs()
+        }
+    }
+    
+    parameters {
+        booleanParam(
+            name: 'DEPLOY_ALL_DEV',
+            defaultValue: false,
+            description: 'Deploy to all development servers'
+        )
+        booleanParam(
+            name: 'DEPLOY_ALL_STAGING',
+            defaultValue: false,
+            description: 'Deploy to all staging servers'
+        )
+        choice(
+            name: 'CREDENTIAL_METHOD',
+            choices: ['jenkins', 'ansible-vault'],
+            description: 'Choose credential management method'
+        )
+    }
+}

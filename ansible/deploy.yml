@@ -1,0 +1,81 @@
+---
+- name: Deploy Rails Application
+  hosts: all
+  become: yes
+  vars:
+    app_path: "{{ app_path | default('/var/www/hello-world-appp') }}"
+    app_user: "{{ app_user | default('deploy') }}"
+    rails_env: "{{ rails_env | default('development') }}"
+    branch_name: "{{ branch_name | default('dev') }}"
+    
+  tasks:
+    - name: Display deployment information
+      debug:
+        msg: |
+          Deploying to: {{ inventory_hostname }}
+          Rails Environment: {{ rails_env }}
+          Branch: {{ branch_name }}
+          App Path: {{ app_path }}
+          
+    - name: Ensure application directory exists
+      file:
+        path: "{{ app_path }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+    
+    - name: Pull latest code from repository
+      git:
+        repo: "{{ git_repo_url }}"
+        dest: "{{ app_path }}"
+        version: "{{ branch_name }}"
+        force: yes
+      become_user: "{{ app_user }}"
+    
+    # - name: Install Ruby gems
+    #   shell: "bundle install"
+    #   args:
+    #     chdir: "{{ app_path }}"
+    #   become_user: "{{ app_user }}"
+    #   environment:
+    #     RAILS_ENV: "{{ rails_env }}"
+    
+    # - name: Create database
+    #   shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:create"
+    #   args:
+    #     chdir: "{{ app_path }}"
+    #   become_user: "{{ app_user }}"
+    #   ignore_errors: yes
+    
+    - name: Run database migrations
+      shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:migrate"
+      args:
+        chdir: "{{ app_path }}"
+      become_user: "{{ app_user }}"
+    
+    - name: Precompile assets
+      shell: "RAILS_ENV={{ rails_env }} bundle exec rake assets:precompile"
+      args:
+        chdir: "{{ app_path }}"
+      become_user: "{{ app_user }}"
+    
+    # - name: Set proper permissions
+    #   file:
+    #     path: "{{ app_path }}"
+    #     owner: "{{ app_user }}"
+    #     group: "{{ app_user }}"
+    #     recurse: yes
+    
+    - name: Restart Apache service
+      service:
+        name: apache2
+        state: restarted
+      notify:
+        - check apache status
+  
+  handlers:
+    - name: check apache status
+      service:
+        name: apache2
+        state: started

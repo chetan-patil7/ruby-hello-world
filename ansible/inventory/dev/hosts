@@ -1,0 +1,30 @@
+# Development Environment Inventory
+
+[dev1_servers]
+dev1-server ansible_host=192.168.1.101 ansible_user=deploy
+
+[dev2_servers]
+dev2-server ansible_host=192.168.1.102 ansible_user=deploy
+
+[dev3_servers]
+dev3-server ansible_host=192.168.1.103 ansible_user=deploy
+
+[dev1_servers:vars]
+git_repo_url=https://github.com/your-org/your-rails-app.git
+app_path=/var/www/rails_app_dev1
+app_user=deploy
+
+[dev2_servers:vars]
+git_repo_url=https://github.com/your-org/your-rails-app.git
+app_path=/var/www/rails_app_dev2
+app_user=deploy
+
+[dev3_servers:vars]
+git_repo_url=https://github.com/your-org/your-rails-app.git
+app_path=/var/www/rails_app_dev3
+app_user=deploy
+
+[all_dev_servers:children]
+dev1_servers
+dev2_servers
+dev3_servers
