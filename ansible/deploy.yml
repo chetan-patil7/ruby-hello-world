@@ -19,45 +19,50 @@
           Git Repo: {{ git_repo_url }}
           Deploy Type: {{ deploy_type | default('UNKNOWN') }}
           
-    # - name: Remove application directory completely
-    #   file:
-    #     path: "{{ app_path }}"
-    #     state: absent
+    - name: Remove application directory completely
+      file:
+        path: "{{ app_path }}"
+        state: absent
 
-    # - name: Create fresh application directory
-    #   file:
-    #     path: "{{ app_path }}"
-    #     state: directory
-    #     owner: "{{ app_user }}"
-    #     group: "{{ app_user }}"
-    #     mode: '0755'
+    - name: Create fresh application directory
+      file:
+        path: "{{ app_path }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
     
-    # - name: Deploy latest code from repository (clean slate)
-    #   git:
-    #     repo: "{{ git_repo_url }}"
-    #     dest: "{{ app_path }}"
-    #     version: "{{ branch_name }}"
-    #     force: yes
-    #   become_user: "{{ app_user }}"
-    #   register: git_result
+    - name: Deploy latest code from repository (clean slate)
+      git:
+        repo: "{{ git_repo_url }}"
+        dest: "{{ app_path }}"
+        version: "{{ branch_name }}"
+        force: yes
+      become_user: "{{ app_user }}"
+      register: git_result
 
-    # - name: Display deployment result
-    #   debug:
-    #     msg: "✅ Code deployment completed. Changed: {{ git_result.changed }}"
+    - name: Display deployment result
+      debug:
+        msg: "✅ Code deployment completed. Changed: {{ git_result.changed }}"
 
-    # - name: Install Ruby gems
-    #   shell: "bundle install --deployment --without development test"
-    #   args:
-    #     chdir: "{{ app_path }}"
-    #   become_user: "{{ app_user }}"
-    #   environment:
-    #     RAILS_ENV: "{{ rails_env }}"
-    #   ignore_errors: yes
-    #   register: bundle_result
+    - name: Check if Gemfile exists
+      stat:
+        path: "{{ app_path }}/Gemfile"
+      register: gemfile_exists
+
+    - name: Install Ruby gems
+      shell: "bundle install --deployment --without development test"
+      args:
+        chdir: "{{ app_path }}"
+      become_user: "{{ app_user }}"
+      environment:
+        RAILS_ENV: "{{ rails_env }}"
+      when: gemfile_exists.stat.exists
+      register: bundle_result
       
-    # - name: Display bundle install result
-    #   debug:
-    #     msg: "📦 Bundle install completed: {{ bundle_result.changed | default('failed') }}"
+    - name: Display bundle install result
+      debug:
+        msg: "📦 Bundle install completed: {{ bundle_result.changed | default('skipped - no Gemfile') }}"
     
     - name: Run database migrations
       shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:migrate"
@@ -108,7 +113,9 @@
           Server: {{ inventory_hostname }}
           Environment: {{ rails_env }}
           Branch: {{ branch_name }}
-          Status: {% if git_result.changed %}SUCCESS{% else %}PARTIAL{% endif %}
+          Deploy Type: {{ deploy_type | default('UNKNOWN') }}
+          Git Status: {% if git_result is defined and git_result.changed %}SUCCESS{% else %}PARTIAL{% endif %}
+          Bundle Status: {% if bundle_result is defined and bundle_result.changed %}SUCCESS{% elif bundle_result is defined %}FAILED{% else %}SKIPPED{% endif %}
   
   handlers:
     - name: check apache status

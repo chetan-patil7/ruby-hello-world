@@ -1,7 +1,7 @@
 # ansible/inventory/dev/hosts
 
 [dev1_servers]
-dev1-server ansible_host=54.210.171.180 ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
+dev1-server ansible_host=44.220.204.85 ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
 
 [dev2_servers]
 dev2-server ansible_host=YOUR_DEV2_SERVER_IP ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
@@ -11,9 +11,8 @@ dev3-server ansible_host=YOUR_DEV3_SERVER_IP ansible_user=deploy ansible_ssh_pri
 
 [dev_servers:children]
 dev1_servers
-dev2_servers
+dev2_servers  
 dev3_servers
 
 [dev_servers:vars]
 ansible_python_interpreter=/usr/bin/python3
-rails_env=development
