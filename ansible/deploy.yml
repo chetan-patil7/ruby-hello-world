@@ -26,24 +26,24 @@
         group: "{{ app_user }}"
         mode: '0755'
     
-    # ✅ IMPROVED: Check if it's already a git repository
+    # ✅ Check if it's already a git repository
     - name: Check if directory is a git repository
       stat:
         path: "{{ app_path }}/.git"
       register: git_dir
 
-    # ✅ IMPROVED: Clone only if not already a git repo
-    # - name: Clone repository (first time deployment)
-    #   git:
-    #     repo: "{{ git_repo_url }}"
-    #     dest: "{{ app_path }}"
-    #     version: "{{ branch_name }}"
-    #     force: yes
-    #   become_user: "{{ app_user }}"
-    #   when: not git_dir.stat.exists
-    #   register: git_clone_result
+    # ✅ Clone only if not already a git repo
+    - name: Clone repository (first time deployment)
+      git:
+        repo: "{{ git_repo_url }}"
+        dest: "{{ app_path }}"
+        version: "{{ branch_name }}"
+        force: yes
+      become_user: "{{ app_user }}"
+      when: not git_dir.stat.exists
+      register: git_clone_result
 
-    # ✅ IMPROVED: Pull updates if already a git repo
+    # ✅ Pull updates if already a git repo
     - name: Pull latest changes (subsequent deployments)
       git:
         repo: "{{ git_repo_url }}"
@@ -66,7 +66,7 @@
           No git operation performed
           {% endif %}
 
-    # ✅ IMPROVED: Check if Gemfile exists before bundle install
+    # ✅ Check if Gemfile exists before bundle install
     # - name: Check if Gemfile exists
     #   stat:
     #     path: "{{ app_path }}/Gemfile"
@@ -87,7 +87,7 @@
     #     msg: "Bundle install completed: {{ bundle_result.changed | default('skipped') }}"
     #   when: gemfile_exists.stat.exists
     
-    # # ✅ IMPROVED: Check if it's a Rails app before running Rails commands
+    # # ✅ IMPORTANT: Check if this is a Rails application
     # - name: Check if this is a Rails application
     #   stat:
     #     path: "{{ app_path }}/config/application.rb"
@@ -95,11 +95,11 @@
 
     # - name: Create database (ignore if already exists)
     #   shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:create"
-      # args:
-      #   chdir: "{{ app_path }}"
-      # become_user: "{{ app_user }}"
-      # ignore_errors: yes
-      # when: rails_app.stat.exists
+    #   args:
+    #     chdir: "{{ app_path }}"
+    #   become_user: "{{ app_user }}"
+    #   ignore_errors: yes
+    #   when: rails_app.stat.exists
     
     - name: Run database migrations
       shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:migrate"
@@ -133,9 +133,9 @@
         owner: "{{ app_user }}"
         group: "{{ app_user }}"
         recurse: yes
-        mode: 'u=rwX,g=rX,o=rX'  # More specific permissions
+        mode: 'u=rwX,g=rX,o=rX'
     
-    # ✅ IMPROVED: Check if Apache is installed before restarting
+    # ✅ Check if Apache is installed before restarting
     - name: Check if Apache is installed
       command: systemctl is-enabled apache2
       register: apache_status
@@ -164,8 +164,3 @@
       service:
         name: apache2
         state: started
-      register: apache_check
-      
-    - name: display apache status
-      debug:
-        msg: "Apache status check: {{ apache_check.state | default('unknown') }}"
