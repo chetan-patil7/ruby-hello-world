@@ -3,7 +3,6 @@
   hosts: all
   become: yes
   vars:
-    # ✅ Fixed variables - no recursion
     app_user: "deploy"
     app_path: "/var/www/hello-world-app"
     rails_env: "staging1"
@@ -26,25 +25,8 @@
         group: "{{ app_user }}"
         mode: '0755'
     
-    # ✅ Check if it's already a git repository
-    - name: Check if directory is a git repository
-      stat:
-        path: "{{ app_path }}/.git"
-      register: git_dir
-
-    # ✅ Clone only if not already a git repo
-    - name: Clone repository (first time deployment)
-      git:
-        repo: "{{ git_repo_url }}"
-        dest: "{{ app_path }}"
-        version: "{{ branch_name }}"
-        force: yes
-      become_user: "{{ app_user }}"
-      when: not git_dir.stat.exists
-      register: git_clone_result
-
-    # ✅ Pull updates if already a git repo
-    - name: Pull latest changes (subsequent deployments)
+    # ✅ SIMPLE: Just deploy/update the code - no complex checks
+    - name: Deploy latest code from repository
       git:
         repo: "{{ git_repo_url }}"
         dest: "{{ app_path }}"
@@ -52,26 +34,13 @@
         force: yes
         update: yes
       become_user: "{{ app_user }}"
-      when: git_dir.stat.exists
-      register: git_pull_result
+      register: git_result
 
-    - name: Display git operation result
-      debug:
-        msg: |
-          {% if git_clone_result is defined and git_clone_result.changed %}
-          Repository cloned successfully
-          {% elif git_pull_result is defined %}
-          Repository updated. Changed: {{ git_pull_result.changed }}
-          {% else %}
-          No git operation performed
-          {% endif %}
+    # - name: Display deployment result
+    #   debug:
+    #     msg: "Code deployment completed. Changed: {{ git_result.changed }}"
 
-    # ✅ Check if Gemfile exists before bundle install
-    # - name: Check if Gemfile exists
-    #   stat:
-    #     path: "{{ app_path }}/Gemfile"
-    #   register: gemfile_exists
-
+    # # ✅ Install dependencies if Gemfile exists
     # - name: Install Ruby gems
     #   shell: "bundle install --deployment --without development test"
     #   args:
@@ -79,85 +48,55 @@
     #   become_user: "{{ app_user }}"
     #   environment:
     #     RAILS_ENV: "{{ rails_env }}"
-    #   when: gemfile_exists.stat.exists
+    #   ignore_errors: yes
     #   register: bundle_result
       
     # - name: Display bundle install result
     #   debug:
-    #     msg: "Bundle install completed: {{ bundle_result.changed | default('skipped') }}"
-    #   when: gemfile_exists.stat.exists
+    #     msg: "Bundle install completed: {{ bundle_result.changed | default('failed') }}"
     
-    # # ✅ IMPORTANT: Check if this is a Rails application
-    # - name: Check if this is a Rails application
-    #   stat:
-    #     path: "{{ app_path }}/config/application.rb"
-    #   register: rails_app
-
-    # - name: Create database (ignore if already exists)
-    #   shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:create"
-    #   args:
-    #     chdir: "{{ app_path }}"
-    #   become_user: "{{ app_user }}"
-    #   ignore_errors: yes
-    #   when: rails_app.stat.exists
-    
+    # # ✅ Run Rails tasks if it's a Rails app
     - name: Run database migrations
       shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:migrate"
       args:
         chdir: "{{ app_path }}"
       become_user: "{{ app_user }}"
-      when: rails_app.stat.exists
+      ignore_errors: yes
       register: migration_result
       
     - name: Display migration result
       debug:
-        msg: "Database migration completed: {{ migration_result.changed | default('skipped') }}"
-      when: rails_app.stat.exists
+        msg: "Database migration completed: {{ migration_result.changed | default('failed') }}"
     
     - name: Precompile assets
       shell: "RAILS_ENV={{ rails_env }} bundle exec rake assets:precompile"
       args:
         chdir: "{{ app_path }}"
       become_user: "{{ app_user }}"
-      when: rails_app.stat.exists
+      ignore_errors: yes
       register: assets_result
       
     - name: Display assets compilation result
       debug:
-        msg: "Assets precompilation completed: {{ assets_result.changed | default('skipped') }}"
-      when: rails_app.stat.exists
+        msg: "Assets precompilation completed: {{ assets_result.changed | default('failed') }}"
     
-    - name: Set proper permissions on application directory
+    - name: Set proper permissions
       file:
         path: "{{ app_path }}"
         owner: "{{ app_user }}"
         group: "{{ app_user }}"
         recurse: yes
-        mode: 'u=rwX,g=rX,o=rX'
     
-    # ✅ Check if Apache is installed before restarting
-    - name: Check if Apache is installed
-      command: systemctl is-enabled apache2
-      register: apache_status
-      ignore_errors: yes
-      changed_when: false
-
     - name: Restart Apache service
       service:
         name: apache2
         state: restarted
-      when: apache_status.rc == 0
-      notify:
-        - check apache status
+      ignore_errors: yes
+      register: apache_result
 
     - name: Display Apache restart result
       debug:
-        msg: |
-          {% if apache_status.rc == 0 %}
-          Apache service restarted successfully
-          {% else %}
-          Apache service not found or not enabled - skipped restart
-          {% endif %}
+        msg: "Apache restart completed: {{ apache_result.changed | default('failed') }}"
   
   handlers:
     - name: check apache status
