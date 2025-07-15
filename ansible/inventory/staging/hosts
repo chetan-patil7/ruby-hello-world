@@ -1,7 +1,7 @@
 # inventory/staging/hosts
 
 [staging1_servers]
-staging1-server ansible_host=YOUR_SERVER_IP_OR_HOSTNAME ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
+staging1-server ansible_host=54.210.171.180 ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
 
 # Example with actual values:
 # staging1-server ansible_host=192.168.1.100 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/staging_key
