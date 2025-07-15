@@ -8,7 +8,7 @@ pipeline {
         DEV3_BRANCH = 'dev3'
         STAGING1_BRANCH = 'staging1'
         
-        ANSIBLE_PLAYBOOK = 'deploy.yml'
+        ANSIBLE_PLAYBOOK = 'ansible/deploy.yml'
     }
     
     stages {
