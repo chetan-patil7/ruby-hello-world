@@ -1,0 +1,12 @@
+# inventory/staging/hosts
+
+[staging1_servers]
+staging1-server ansible_host=YOUR_SERVER_IP_OR_HOSTNAME ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
+
+# Example with actual values:
+# staging1-server ansible_host=192.168.1.100 ansible_user=ubuntu ansible_ssh_private_key_file=~/.ssh/staging_key
+
+[staging1_servers:vars]
+# Common variables for staging1 servers
+ansible_python_interpreter=/usr/bin/python3
+# Add other staging-specific variables here
