@@ -68,6 +68,14 @@ pipeline {
                             env.ANSIBLE_INVENTORY = 'ansible/inventory/staging/hosts'
                             env.DEPLOY_TYPE = 'STAGING'
                             break
+                        case MAIN_BRANCH:
+                        case MASTER_BRANCH:
+                            env.TARGET_SERVER = 'production-server'
+                            env.RAILS_ENV = 'production'
+                            env.ANSIBLE_LIMIT = 'production_servers'
+                            env.ANSIBLE_INVENTORY = 'ansible/inventory/production/hosts'
+                            env.DEPLOY_TYPE = 'PRODUCTION'
+                            break
                         default:
                             error("❌ Branch '${env.DETECTED_BRANCH}' is not configured for deployment. Supported branches: dev1, dev2, dev3, staging1, main, master")
                     }
@@ -133,6 +141,41 @@ pipeline {
 
                         // IMPORTANT: This is a shell command, NOT the ansiblePlaybook plugin
                         sh """
+                            # Add all possible Ansible paths to PATH
+                            export PATH="/Users/abcom/Library/Python/3.9/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
+                            
+                            # Verify inventory file exists and show its content
+                            if [ ! -f "${env.ANSIBLE_INVENTORY}" ]; then
+                                echo "❌ Inventory file not found: ${env.ANSIBLE_INVENTORY}"
+                                echo "Available files in inventory directory:"
+                                find ansible/inventory/ -type f 2>/dev/null || echo "No ansible/inventory directory found"
+                                exit 1
+                            fi
+                            
+                            echo "✅ Found inventory file: ${env.ANSIBLE_INVENTORY}"
+                            echo "📖 Inventory content:"
+                            cat ${env.ANSIBLE_INVENTORY}
+                            echo "\\n📏 File size: \$(wc -c < ${env.ANSIBLE_INVENTORY}) bytes"
+                            echo "📄 Line count: \$(wc -l < ${env.ANSIBLE_INVENTORY}) lines"
+                            
+                            # Test inventory parsing with detailed output
+                            echo "\\n🧪 Testing inventory parsing:"
+                            ansible-inventory -i ${env.ANSIBLE_INVENTORY} --list -v || {
+                                echo "❌ Inventory parsing failed"
+                                echo "\\nLet's try a simple syntax check:"
+                                if [ -s "${env.ANSIBLE_INVENTORY}" ]; then
+                                    echo "File is not empty, checking first few lines:"
+                                    head -10 ${env.ANSIBLE_INVENTORY}
+                                else
+                                    echo "❌ File is empty!"
+                                    exit 1
+                                fi
+                                exit 1
+                            }
+                            
+                            # Check if the group exists
+                            echo "\\n🔍 Checking for staging1_servers group:"
+                            ansible-inventory -i ${env.ANSIBLE_INVENTORY} --graph
                             
                             # Run the deployment with all required variables
                             echo "\\n🚀 Running deployment:"
