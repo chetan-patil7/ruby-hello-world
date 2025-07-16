@@ -3,16 +3,16 @@
 [dev1_servers]
 dev1-server ansible_host=54.210.171.180 ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
 
-[dev2_servers]
-dev2-server ansible_host=54.210.171.180 ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
+; [dev2_servers]
+; dev2-server ansible_host=54.210.171.180 ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
 
-[dev3_servers]
-dev3-server ansible_host=54.210.171.180 ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
+; [dev3_servers]
+; dev3-server ansible_host=54.210.171.180 ansible_user=deploy ansible_ssh_private_key_file=~/.ssh/deploy_key
 
 [dev_servers:children]
 dev1_servers
-dev2_servers  
-dev3_servers
+; dev2_servers  
+; dev3_servers
 
 [dev_servers:vars]
 ansible_python_interpreter=/usr/bin/python3
