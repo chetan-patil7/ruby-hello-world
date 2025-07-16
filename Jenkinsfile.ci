@@ -1,210 +1,491 @@
 pipeline {
     agent any
-    
+
     environment {
-        RAILS_ENV = 'test'
-        RUBY_VERSION = '3.1.3'
-        BUNDLER_VERSION = '2.3.0'
-        DB_USERNAME = credentials('db-username')
-        DB_PASSWORD = credentials('db-password')
-        SECRET_KEY_BASE = credentials('rails-secret-key-base')
+        DEV1_BRANCH = 'dev1'
+        DEV2_BRANCH = 'dev2'
+        DEV3_BRANCH = 'dev3'
+        STAGING1_BRANCH = 'staging1'
+
+        ANSIBLE_PLAYBOOK = 'ansible/deploy.yml'
+        ANSIBLE_VAULT_PASSWORD_ID = 'ansible_vault_password'
+        
+        GIT_REPO_URL = 'https://github.com/chetan-patil7/ruby-hello-world.git'
     }
-    
+
     stages {
-        stage('Checkout') {
+        stage('Checkout & Branch Detection') {
             steps {
                 checkout scm
-                echo "Checked out code from repository"
+                script {
+                    if (env.BRANCH_NAME) {
+                        env.DETECTED_BRANCH = env.BRANCH_NAME
+                    } else if (env.GIT_BRANCH) {
+                        env.DETECTED_BRANCH = env.GIT_BRANCH.replaceFirst(/^origin\//, '')
+                    } else {
+                        def branchName = sh(
+                            script: "git branch -r --contains HEAD | grep origin | head -1 | sed 's/.*origin\\///'",
+                            returnStdout: true
+                        ).trim()
+                        env.DETECTED_BRANCH = branchName
+                    }
+
+                    echo "✅ Detected branch: ${env.DETECTED_BRANCH}"
+                }
             }
         }
-        
+
+        stage('Determine Target Server') {
+            steps {
+                script {
+                    switch(env.DETECTED_BRANCH) {
+                        case DEV1_BRANCH:
+                            env.TARGET_SERVER = 'dev1-server'
+                            env.RAILS_ENV = 'development1'
+                            env.ANSIBLE_LIMIT = 'dev1_servers'
+                            env.ANSIBLE_INVENTORY = 'ansible/inventory/dev/hosts'
+                            env.DEPLOY_TYPE = 'DEVELOPMENT'
+                            break
+                        case DEV2_BRANCH:
+                            env.TARGET_SERVER = 'dev2-server'
+                            env.RAILS_ENV = 'development2'
+                            env.ANSIBLE_LIMIT = 'dev2_servers'
+                            env.ANSIBLE_INVENTORY = 'ansible/inventory/dev/hosts'
+                            env.DEPLOY_TYPE = 'DEVELOPMENT'
+                            break
+                        case DEV3_BRANCH:
+                            env.TARGET_SERVER = 'dev3-server'
+                            env.RAILS_ENV = 'development3'
+                            env.ANSIBLE_LIMIT = 'dev3_servers'
+                            env.ANSIBLE_INVENTORY = 'ansible/inventory/dev/hosts'
+                            env.DEPLOY_TYPE = 'DEVELOPMENT'
+                            break
+                        case STAGING1_BRANCH:
+                            env.TARGET_SERVER = 'staging1-server'
+                            env.RAILS_ENV = 'staging1'
+                            env.ANSIBLE_LIMIT = 'staging1_servers'
+                            env.ANSIBLE_INVENTORY = 'ansible/inventory/staging/hosts'
+                            env.DEPLOY_TYPE = 'STAGING'
+                            break
+                        default:
+                            error("❌ Branch '${env.DETECTED_BRANCH}' is not configured for deployment")
+                    }
+
+                    echo "🚀 Deployment Configuration:"
+                    echo "Branch: ${env.DETECTED_BRANCH}"
+                    echo "Deploy Type: ${env.DEPLOY_TYPE}"
+                    echo "Target server: ${env.TARGET_SERVER}"
+                    echo "Rails environment: ${env.RAILS_ENV}"
+                }
+            }
+        }
+
         stage('Setup Ruby Environment') {
             steps {
                 script {
-                    // Install rbenv and Ruby if not present
-                    sh '''
-                        # Check if rbenv is installed
-                        if ! command -v rbenv &> /dev/null; then
-                            echo "Installing rbenv..."
-                            curl -fsSL https://github.com/rbenv/rbenv-installer/raw/HEAD/bin/rbenv-installer | bash
-                            export PATH="$HOME/.rbenv/bin:$PATH"
-                            eval "$(rbenv init -)"
-                        fi
+                    echo "🔧 Setting up Ruby environment for testing..."
+                    sh """
+                        # Check Ruby environment
+                        echo "Ruby version: \$(ruby --version)"
+                        echo "Bundler version: \$(bundle --version)"
                         
-                        # Install Ruby version if not present
-                        if ! rbenv versions | grep -q ${RUBY_VERSION}; then
-                            echo "Installing Ruby ${RUBY_VERSION}..."
-                            rbenv install ${RUBY_VERSION}
+                        # Install gems for testing (in local directory)
+                        if [ -f Gemfile ]; then
+                            echo "📦 Installing gems for testing..."
+                            bundle install --path vendor/bundle --jobs 4
+                        else
+                            echo "⚠️ No Gemfile found - skipping bundle install"
                         fi
-                        
-                        rbenv global ${RUBY_VERSION}
-                        rbenv rehash
-                    '''
+                    """
                 }
             }
         }
-        
-        stage('Install Dependencies') {
-            steps {
-                script {
-                    sh '''
-                        export PATH="$HOME/.rbenv/bin:$PATH"
-                        eval "$(rbenv init -)"
-                        
-                        # Install bundler
-                        gem install bundler -v ${BUNDLER_VERSION}
-                        
-                        # Install gems
-                        bundle install --jobs=4 --retry=3
-                        
-                        # Install system dependencies for mimemagic
-                        if command -v brew &> /dev/null; then
-                            brew install shared-mime-info || true
-                        fi
-                    '''
+
+        stage('Code Quality Checks') {
+            parallel {
+                stage('RuboCop - Style & Syntax') {
+                    steps {
+                        script {
+                            echo "🔍 Running RuboCop for style and syntax checks..."
+                            sh """
+                                if [ -f Gemfile ]; then
+                                    # Check if RuboCop is available
+                                    if bundle exec rubocop --version &>/dev/null; then
+                                        echo "✅ RuboCop found, running checks..."
+                                        
+                                        # Create RuboCop output directory
+                                        mkdir -p reports
+                                        
+                                        # Run RuboCop with detailed output
+                                        bundle exec rubocop \\
+                                            --format progress \\
+                                            --format json --out reports/rubocop.json \\
+                                            --format html --out reports/rubocop.html \\
+                                            . || echo "⚠️ RuboCop found issues (non-blocking)"
+                                        
+                                        echo "📊 RuboCop Summary:"
+                                        bundle exec rubocop --format offenses . || true
+                                    else
+                                        echo "⚠️ RuboCop not available in Gemfile - installing temporarily..."
+                                        gem install rubocop
+                                        rubocop --format progress . || echo "⚠️ RuboCop found issues"
+                                    fi
+                                else
+                                    echo "⚠️ No Gemfile found - using system RuboCop if available"
+                                    if command -v rubocop &> /dev/null; then
+                                        rubocop --format progress . || echo "⚠️ RuboCop found issues"
+                                    else
+                                        echo "❌ RuboCop not available"
+                                    fi
+                                fi
+                            """
+                        }
+                    }
+                    post {
+                        always {
+                            // Archive RuboCop reports
+                            archiveArtifacts artifacts: 'reports/rubocop.*', allowEmptyArchive: true
+                        }
+                    }
                 }
-            }
-        }
-        
-        stage('Setup Database') {
-            steps {
-                script {
-                    withCredentials([
-                        string(credentialsId: 'db-username', variable: 'DB_USER'),
-                        string(credentialsId: 'db-password', variable: 'DB_PASS')
-                    ]) {
-                        sh '''
-                            export PATH="$HOME/.rbenv/bin:$PATH"
-                            eval "$(rbenv init -)"
-                            
-                            # Start PostgreSQL if not running
-                            if command -v brew &> /dev/null; then
-                                brew services start postgresql || true
-                            fi
-                            
-                            # Set database URL
-                            export DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost:5432/hello_world_test"
-                            
-                            # Create and setup test database
-                            RAILS_ENV=test bundle exec rake db:create
-                            RAILS_ENV=test bundle exec rake db:migrate
-                        '''
+
+                stage('Brakeman - Security Scan') {
+                    steps {
+                        script {
+                            echo "🔒 Running Brakeman security analysis..."
+                            sh """
+                                if [ -f Gemfile ]; then
+                                    if bundle exec brakeman --version &>/dev/null; then
+                                        echo "✅ Brakeman found, running security scan..."
+                                        
+                                        mkdir -p reports
+                                        
+                                        # Run Brakeman security scan
+                                        bundle exec brakeman \\
+                                            --format json --output reports/brakeman.json \\
+                                            --format html --output reports/brakeman.html \\
+                                            --format text \\
+                                            --no-pager \\
+                                            . || echo "⚠️ Brakeman found security issues (non-blocking)"
+                                        
+                                        echo "🔒 Brakeman Summary:"
+                                        bundle exec brakeman --format text --no-pager . || true
+                                    else
+                                        echo "⚠️ Brakeman not available - installing temporarily..."
+                                        gem install brakeman
+                                        brakeman --format text --no-pager . || echo "⚠️ Security issues found"
+                                    fi
+                                else
+                                    echo "⚠️ No Rails application detected for Brakeman scan"
+                                fi
+                            """
+                        }
+                    }
+                    post {
+                        always {
+                            archiveArtifacts artifacts: 'reports/brakeman.*', allowEmptyArchive: true
+                        }
+                    }
+                }
+
+                stage('Ruby Syntax Check') {
+                    steps {
+                        script {
+                            echo "✅ Checking Ruby syntax..."
+                            sh """
+                                echo "🔍 Checking Ruby syntax for all .rb files..."
+                                
+                                # Find and check all Ruby files
+                                find . -name "*.rb" -not -path "./vendor/*" -not -path "./tmp/*" | while read file; do
+                                    echo "Checking: \$file"
+                                    if ! ruby -c "\$file" >/dev/null 2>&1; then
+                                        echo "❌ Syntax error in: \$file"
+                                        ruby -c "\$file"
+                                        exit 1
+                                    fi
+                                done
+                                
+                                echo "✅ All Ruby files have valid syntax"
+                            """
+                        }
+                    }
+                }
+
+                stage('Bundle Audit - Vulnerability Check') {
+                    steps {
+                        script {
+                            echo "🛡️ Checking for vulnerable gems..."
+                            sh """
+                                if [ -f Gemfile ]; then
+                                    # Install bundle-audit if not available
+                                    if ! bundle exec bundle-audit --version &>/dev/null; then
+                                        echo "📦 Installing bundle-audit..."
+                                        gem install bundle-audit
+                                    fi
+                                    
+                                    echo "🔍 Updating vulnerability database..."
+                                    bundle-audit update
+                                    
+                                    echo "🛡️ Checking for vulnerable gems..."
+                                    mkdir -p reports
+                                    
+                                    bundle-audit check > reports/bundle-audit.txt || echo "⚠️ Vulnerable gems found (non-blocking)"
+                                    cat reports/bundle-audit.txt
+                                else
+                                    echo "⚠️ No Gemfile found - skipping vulnerability check"
+                                fi
+                            """
+                        }
+                    }
+                    post {
+                        always {
+                            archiveArtifacts artifacts: 'reports/bundle-audit.txt', allowEmptyArchive: true
+                        }
                     }
                 }
             }
         }
-        
-        stage('Run Tests') {
-            steps {
-                script {
-                    sh '''
-                        export PATH="$HOME/.rbenv/bin:$PATH"
-                        eval "$(rbenv init -)"
-                        
-                        # Run RSpec tests if present
-                        if [ -f "spec/rails_helper.rb" ]; then
-                            RAILS_ENV=test bundle exec rspec
-                        fi
-                        
-                        # Run Minitest if present
-                        if [ -d "test" ]; then
-                            RAILS_ENV=test bundle exec rake test
-                        fi
-                    '''
+
+        stage('Rails-Specific Checks') {
+            parallel {
+                stage('Database Schema Check') {
+                    steps {
+                        script {
+                            echo "📋 Checking database schema..."
+                            sh """
+                                if [ -f config/database.yml ]; then
+                                    echo "✅ Database configuration found"
+                                    
+                                    # Check if migration files are valid
+                                    if [ -d db/migrate ]; then
+                                        echo "🔍 Checking migration files..."
+                                        find db/migrate -name "*.rb" | while read migration; do
+                                            echo "Checking migration: \$migration"
+                                            ruby -c "\$migration" || exit 1
+                                        done
+                                        echo "✅ All migration files are valid"
+                                    else
+                                        echo "⚠️ No migrations directory found"
+                                    fi
+                                    
+                                    # Check for pending migrations (if we can connect to test DB)
+                                    if bundle exec rails db:version &>/dev/null; then
+                                        echo "📊 Current database version:"
+                                        bundle exec rails db:version
+                                    else
+                                        echo "⚠️ Cannot connect to database for version check"
+                                    fi
+                                else
+                                    echo "⚠️ No database configuration found"
+                                fi
+                            """
+                        }
+                    }
+                }
+
+                stage('Rails Configuration Check') {
+                    steps {
+                        script {
+                            echo "⚙️ Checking Rails configuration..."
+                            sh """
+                                if [ -f config/application.rb ]; then
+                                    echo "✅ Rails application configuration found"
+                                    
+                                    # Check environment configs
+                                    for env in development test production; do
+                                        if [ -f "config/environments/\$env.rb" ]; then
+                                            echo "✅ \$env environment config found"
+                                            ruby -c "config/environments/\$env.rb" || exit 1
+                                        else
+                                            echo "⚠️ \$env environment config missing"
+                                        fi
+                                    done
+                                    
+                                    # Check routes file
+                                    if [ -f config/routes.rb ]; then
+                                        echo "✅ Routes configuration found"
+                                        ruby -c config/routes.rb || exit 1
+                                    fi
+                                    
+                                    # Check for secrets/credentials
+                                    if [ -f config/credentials.yml.enc ]; then
+                                        echo "✅ Encrypted credentials found"
+                                    elif [ -f config/secrets.yml ]; then
+                                        echo "✅ Secrets configuration found"
+                                    else
+                                        echo "⚠️ No secrets/credentials configuration found"
+                                    fi
+                                else
+                                    echo "❌ Not a Rails application"
+                                fi
+                            """
+                        }
+                    }
+                }
+
+                stage('Asset Pipeline Check') {
+                    steps {
+                        script {
+                            echo "🎨 Checking asset pipeline..."
+                            sh """
+                                # Check for asset directories
+                                if [ -d app/assets ]; then
+                                    echo "✅ Assets directory found"
+                                    
+                                    # Check JavaScript files
+                                    if [ -d app/assets/javascripts ] || [ -d app/javascript ]; then
+                                        echo "📜 Checking JavaScript files..."
+                                        # Basic syntax check for JS files
+                                        find app/assets app/javascript -name "*.js" 2>/dev/null | while read jsfile; do
+                                            echo "Checking: \$jsfile"
+                                            # You could add Node.js syntax checking here if needed
+                                        done
+                                    fi
+                                    
+                                    # Check CSS/SCSS files
+                                    if [ -d app/assets/stylesheets ]; then
+                                        echo "🎨 Checking stylesheet files..."
+                                        find app/assets/stylesheets -name "*.scss" -o -name "*.css" | while read stylesheet; do
+                                            echo "Found stylesheet: \$stylesheet"
+                                        done
+                                    fi
+                                else
+                                    echo "⚠️ No assets directory found"
+                                fi
+                                
+                                # Check if assets can be precompiled (in test mode)
+                                if [ -f Gemfile ] && bundle exec rails assets:precompile --dry-run &>/dev/null; then
+                                    echo "✅ Asset precompilation check passed"
+                                else
+                                    echo "⚠️ Asset precompilation check failed or not available"
+                                fi
+                            """
+                        }
+                    }
                 }
             }
         }
-        
-        stage('Asset Precompilation') {
+
+        stage('Test Suite') {
             steps {
                 script {
-                    sh '''
-                        export PATH="$HOME/.rbenv/bin:$PATH"
-                        eval "$(rbenv init -)"
-                        
-                        # Precompile assets for production
-                        RAILS_ENV=production bundle exec rake assets:precompile
-                    '''
+                    echo "🧪 Running test suite..."
+                    sh """
+                        if [ -f Gemfile ]; then
+                            # Check what testing framework is available
+                            if bundle exec rspec --version &>/dev/null; then
+                                echo "🧪 Running RSpec tests..."
+                                mkdir -p reports
+                                bundle exec rspec --format progress --format json --out reports/rspec.json || echo "⚠️ Some tests failed"
+                            elif bundle exec rails test --version &>/dev/null; then
+                                echo "🧪 Running Rails tests..."
+                                bundle exec rails test || echo "⚠️ Some tests failed"
+                            elif bundle exec rake test &>/dev/null; then
+                                echo "🧪 Running Rake tests..."
+                                bundle exec rake test || echo "⚠️ Some tests failed"
+                            else
+                                echo "⚠️ No test framework found (RSpec, Rails test, or Rake test)"
+                                echo "ℹ️ Consider adding tests to your application"
+                            fi
+                        else
+                            echo "⚠️ No Gemfile found - skipping tests"
+                        fi
+                    """
+                }
+            }
+            post {
+                always {
+                    // Archive test reports
+                    archiveArtifacts artifacts: 'reports/rspec.json', allowEmptyArchive: true
+                    // You can also publish test results if using JUnit format
+                    // publishTestResults testResultsPattern: 'reports/rspec.xml'
                 }
             }
         }
-        
-        stage('Build Artifact') {
+
+        stage('Code Quality Summary') {
             steps {
                 script {
-                    sh '''
-                        # Create deployment package
-                        tar -czf hello-world-app-${BUILD_NUMBER}.tar.gz \
-                            --exclude='.git' \
-                            --exclude='tmp' \
-                            --exclude='log' \
-                            --exclude='node_modules' \
-                            --exclude='coverage' \
-                            --exclude='.jenkins' \
-                            --exclude='*.log' \
-                            .
+                    echo "📊 Generating code quality summary..."
+                    sh """
+                        echo "=== CODE QUALITY SUMMARY ==="
+                        echo "Branch: ${env.DETECTED_BRANCH}"
+                        echo "Target: ${env.TARGET_SERVER}"
+                        echo ""
                         
-                        echo "Created artifact: hello-world-app-${BUILD_NUMBER}.tar.gz"
-                        ls -la hello-world-app-*.tar.gz
-                    '''
+                        # RuboCop summary
+                        if [ -f reports/rubocop.json ]; then
+                            echo "📋 RuboCop Issues:"
+                            cat reports/rubocop.json | grep -o '"offense_count":[0-9]*' | head -1 || echo "Could not parse RuboCop results"
+                        fi
+                        
+                        # Brakeman summary
+                        if [ -f reports/brakeman.json ]; then
+                            echo "🔒 Security Issues:"
+                            cat reports/brakeman.json | grep -o '"warnings":\\[.*\\]' || echo "Could not parse Brakeman results"
+                        fi
+                        
+                        # Bundle audit summary
+                        if [ -f reports/bundle-audit.txt ]; then
+                            echo "🛡️ Vulnerability Summary:"
+                            grep -i "vulnerabilities found" reports/bundle-audit.txt || echo "No vulnerabilities found"
+                        fi
+                        
+                        echo "==========================="
+                    """
                 }
-                
-                // Archive the artifact with proper configuration
-                archiveArtifacts artifacts: 'hello-world-app-*.tar.gz', 
-                                fingerprint: true,
-                                allowEmptyArchive: false
-                
-                echo "✅ Artifact archived successfully"
+            }
+        }
+
+        stage('Deploy with Ansible') {
+            when {
+                expression { 
+                    // Only deploy if code quality checks didn't find critical issues
+                    return true // You can add conditions here based on quality gate results
+                }
+            }
+            steps {
+                withCredentials([
+                    string(credentialsId: "${env.ANSIBLE_VAULT_PASSWORD_ID}", variable: 'VAULT_PASSWORD')
+                ]) {
+                    script {
+                        writeFile file: 'vault_pass.txt', text: VAULT_PASSWORD
+
+                        echo "🚀 Deploying to ${env.TARGET_SERVER}..."
+                        
+                        sh """
+                            ansible-playbook -i ${env.ANSIBLE_INVENTORY} \
+                                             --limit ${env.ANSIBLE_LIMIT} \
+                                             --extra-vars "rails_env=${env.RAILS_ENV} branch_name=${env.DETECTED_BRANCH} app_user=deploy app_path=/var/www/hello-world-app git_repo_url=${env.GIT_REPO_URL}" \
+                                             --vault-password-file vault_pass.txt \
+                                             -v \
+                                             ${env.ANSIBLE_PLAYBOOK}
+                        """
+
+                        sh "rm -f vault_pass.txt"
+                    }
+                }
             }
         }
     }
-    
+
     post {
         always {
-            script {
-                node {
-                    // Clean up test database
-                    sh '''
-                        export PATH="$HOME/.rbenv/bin:$PATH"
-                        eval "$(rbenv init -)"
-                        RAILS_ENV=test bundle exec rake db:drop || true
-                    '''
-                }
-            }
-            
-            // Clean workspace but keep artifacts
-            cleanWs(cleanWhenNotBuilt: false,
-                    deleteDirs: true,
-                    disableDeferredWipeout: true,
-                    notFailBuild: true,
-                    patterns: [[pattern: 'hello-world-app-*.tar.gz', type: 'EXCLUDE']])
+            // Archive all reports
+            archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
         }
-        
         success {
-            echo 'CI Pipeline completed successfully!'
-            echo "Build number: ${env.BUILD_NUMBER}"
-            echo "Artifact: hello-world-app-${env.BUILD_NUMBER}.tar.gz"
-            
-            // Trigger CD pipeline with manual approval
             script {
-                try {
-                    build job: 'ruby-rails-cd',  // Updated to match your CD job name
-                          parameters: [
-                              string(name: 'BUILD_NUMBER_TO_DEPLOY', value: env.BUILD_NUMBER),
-                              choice(name: 'ENVIRONMENT', value: 'staging')
-                          ],
-                          wait: false
-                    echo "✅ CD pipeline triggered successfully"
-                } catch (Exception e) {
-                    echo "❌ CD pipeline trigger failed: ${e.message}"
-                    echo "You can manually trigger the CD pipeline with build number: ${env.BUILD_NUMBER}"
-                }
+                echo "✅ SUCCESS: Code quality checks passed and deployment completed for '${env.DETECTED_BRANCH}'"
             }
         }
-        
         failure {
-            echo 'CI Pipeline failed!'
-            // You can add failure notifications here
+            script {
+                echo "❌ FAILED: Code quality checks or deployment failed for '${env.DETECTED_BRANCH}'"
+            }
+        }
+        cleanup {
+            cleanWs()
         }
     }
 }

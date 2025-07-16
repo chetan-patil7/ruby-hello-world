@@ -50,3 +50,46 @@ group :development do
   # Highlight the fine-grained location where an error occurred [https://github.com/ruby/error_highlight]
   gem "error_highlight", ">= 0.4.0", platforms: [ :ruby ]
 end
+# Add these gems to your existing Gemfile for code quality
+
+# Code Quality and Testing gems
+group :development, :test do
+  # Code style and formatting
+  gem 'rubocop', '~> 1.60', require: false
+  gem 'rubocop-rails', '~> 2.23', require: false
+  gem 'rubocop-performance', '~> 1.20', require: false
+  gem 'rubocop-rspec', '~> 2.25', require: false if File.exist?('spec')
+  
+  # Security scanning
+  gem 'brakeman', '~> 6.0', require: false
+  gem 'bundle-audit', '~> 0.1', require: false
+  
+  # Testing framework
+  gem 'rspec-rails', '~> 6.1' if File.exist?('spec')
+  gem 'factory_bot_rails', '~> 6.4' if File.exist?('spec')
+  
+  # Test coverage
+  gem 'simplecov', '~> 0.22', require: false
+  
+  # Database cleaner for tests
+  gem 'database_cleaner-active_record', '~> 2.1'
+  
+  # Debugging
+  gem 'byebug', platforms: [:mri, :mingw, :x64_mingw]
+  gem 'pry-rails', '~> 0.3'
+end
+
+group :development do
+  # N+1 query detection
+  gem 'bullet', '~> 7.1'
+  
+  # Performance monitoring
+  gem 'rack-mini-profiler', '~> 3.3'
+  
+  # Better error pages
+  gem 'better_errors', '~> 2.10'
+  gem 'binding_of_caller', '~> 1.0'
+  
+  # Code documentation
+  gem 'yard', '~> 0.9', require: false
+end
