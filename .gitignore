@@ -44,3 +44,4 @@ ansible/extra_vars.yml
 ansible/user_vars.yml
 *.retry
 ansible/deploy.sh
+VAULT_PASSWORD.txt

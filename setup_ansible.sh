@@ -1,397 +1,331 @@
 #!/bin/bash
 
-# Simplified Rails Deployment Setup Script
-# Creates only the necessary files for your 3-command deployment
+# Quick Ansible Setup - Creates a basic structure with example values
+# Modify the variables below and run this script
 
 set -e
 
-# Colors for output
+# =============================================================================
+# CONFIGURATION - MODIFY THESE VALUES FOR YOUR ENVIRONMENT
+# =============================================================================
+
+# Basic settings
+VAULT_PASSWORD="mySecretVaultPassword123"  # Change this!
+GIT_REPO_URL="https://github.com/chetan-patil7/ruby-hello-world.git"
+APP_NAME="hello-world-app"
+
+# Server IPs (Update these with your actual server IPs)
+DEV1_IP="10.0.1.10"
+DEV2_IP="10.0.1.20"  
+DEV3_IP="10.0.1.30"
+STAGING1_IP="10.0.1.40"
+
+# Database configurations (Update these with your actual database details)
+DEV1_DB_HOST="dev1-db.example.com"
+DEV1_DB_NAME="hello_world_dev1"
+DEV1_DB_USER="dev1_user"
+DEV1_DB_PASS="dev1_password_123"
+
+DEV2_DB_HOST="dev2-db.example.com"
+DEV2_DB_NAME="hello_world_dev2"
+DEV2_DB_USER="dev2_user"
+DEV2_DB_PASS="dev2_password_456"
+
+DEV3_DB_HOST="dev3-db.example.com"
+DEV3_DB_NAME="hello_world_dev3"
+DEV3_DB_USER="dev3_user"
+DEV3_DB_PASS="dev3_password_789"
+
+STAGING1_DB_HOST="staging1-db.example.com"
+STAGING1_DB_NAME="hello_world_staging1"
+STAGING1_DB_USER="staging1_user"
+STAGING1_DB_PASS="staging1_password_abc"
+
+# =============================================================================
+# SCRIPT EXECUTION - DO NOT MODIFY BELOW THIS LINE
+# =============================================================================
+
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-print_status() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
+print_status() { echo -e "${GREEN}✓${NC} $1"; }
+print_info() { echo -e "${BLUE}ℹ${NC} $1"; }
+print_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
+print_error() { echo -e "${RED}✗${NC} $1"; }
 
-print_header() {
-    echo -e "${BLUE}=== $1 ===${NC}"
-}
+echo "🚀 Setting up Ansible directory structure..."
 
-# Configuration - Update these values
-GIT_REPO_URL="https://github.com/your-org/your-rails-app.git"
-APP_USER="deploy"
+# Check prerequisites
+if ! command -v ansible-vault &> /dev/null; then
+    print_error "Ansible is not installed!"
+    print_info "Install with: sudo apt install ansible (Ubuntu) or brew install ansible (macOS)"
+    exit 1
+fi
 
-# Server IPs - Update these to match your actual servers
-DEV1_IP="192.168.1.101"
-DEV2_IP="192.168.1.102"
-DEV3_IP="192.168.1.103"
-STAGING1_IP="10.0.2.101"
-STAGING2_IP="10.0.2.102"
-STAGING3_IP="10.0.2.103"
+# Create directory structure
+print_status "Creating directories..."
+mkdir -p ansible/{inventory,group_vars/{dev1_servers,dev2_servers,dev3_servers,staging1_servers},templates}
 
-print_header "Simple Rails Deployment Setup"
+# Create inventory files
+print_status "Creating inventory files..."
 
-# Create ansible directory structure
-print_status "Creating ansible directory structure..."
-mkdir -p ansible/inventory/{dev,staging}
+cat > ansible/inventory/dev1_hosts << EOF
+[dev1_servers]
+dev1-server ansible_host=$DEV1_IP ansible_user=deploy
+EOF
 
-# Create simplified deployment playbook
+cat > ansible/inventory/dev2_hosts << EOF
+[dev2_servers]
+dev2-server ansible_host=$DEV2_IP ansible_user=deploy
+EOF
+
+cat > ansible/inventory/dev3_hosts << EOF
+[dev3_servers]
+dev3-server ansible_host=$DEV3_IP ansible_user=deploy
+EOF
+
+cat > ansible/inventory/staging1_hosts << EOF
+[staging1_servers]
+staging1-server ansible_host=$STAGING1_IP ansible_user=deploy
+EOF
+
+# Create vars files
+print_status "Creating variable files..."
+
+for env in dev1 dev2 dev3 staging1; do
+    rails_env="development"
+    [ "$env" = "staging1" ] && rails_env="staging"
+    
+    cat > "ansible/group_vars/${env}_servers/vars.yml" << EOF
+---
+app_name: "$APP_NAME"
+app_path: "/var/www/$APP_NAME"
+app_user: "deploy"
+rails_env: "$rails_env"
+git_repo_url: "$GIT_REPO_URL"
+EOF
+done
+
+# Create vault password file
+echo "$VAULT_PASSWORD" > .vault_pass
+chmod 600 .vault_pass
+
+# Create vault files
+print_status "Creating encrypted vault files..."
+
+# Dev1 vault
+cat << EOF | ansible-vault encrypt --vault-password-file .vault_pass --output ansible/group_vars/dev1_servers/vault.yml
+---
+vault_db_host: "$DEV1_DB_HOST"
+vault_db_name: "$DEV1_DB_NAME"
+vault_db_username: "$DEV1_DB_USER"
+vault_db_password: "$DEV1_DB_PASS"
+vault_redis_url: "redis://dev1-redis:6379/0"
+vault_secret_key_base: "$(openssl rand -hex 64)"
+EOF
+
+# Dev2 vault
+cat << EOF | ansible-vault encrypt --vault-password-file .vault_pass --output ansible/group_vars/dev2_servers/vault.yml
+---
+vault_db_host: "$DEV2_DB_HOST"
+vault_db_name: "$DEV2_DB_NAME"
+vault_db_username: "$DEV2_DB_USER"
+vault_db_password: "$DEV2_DB_PASS"
+vault_redis_url: "redis://dev2-redis:6379/0"
+vault_secret_key_base: "$(openssl rand -hex 64)"
+EOF
+
+# Dev3 vault
+cat << EOF | ansible-vault encrypt --vault-password-file .vault_pass --output ansible/group_vars/dev3_servers/vault.yml
+---
+vault_db_host: "$DEV3_DB_HOST"
+vault_db_name: "$DEV3_DB_NAME"
+vault_db_username: "$DEV3_DB_USER"
+vault_db_password: "$DEV3_DB_PASS"
+vault_redis_url: "redis://dev3-redis:6379/0"
+vault_secret_key_base: "$(openssl rand -hex 64)"
+EOF
+
+# Staging1 vault
+cat << EOF | ansible-vault encrypt --vault-password-file .vault_pass --output ansible/group_vars/staging1_servers/vault.yml
+---
+vault_db_host: "$STAGING1_DB_HOST"
+vault_db_name: "$STAGING1_DB_NAME"
+vault_db_username: "$STAGING1_DB_USER"
+vault_db_password: "$STAGING1_DB_PASS"
+vault_redis_url: "redis://staging1-redis:6379/0"
+vault_secret_key_base: "$(openssl rand -hex 64)"
+EOF
+
+# Create database template
+print_status "Creating configuration templates..."
+cat > ansible/templates/database.yml.j2 << 'EOF'
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: 5
+
+development:
+  <<: *default
+  host: {{ vault_db_host }}
+  database: {{ vault_db_name }}
+  username: {{ vault_db_username }}
+  password: {{ vault_db_password }}
+
+staging:
+  <<: *default
+  host: {{ vault_db_host }}
+  database: {{ vault_db_name }}
+  username: {{ vault_db_username }}
+  password: {{ vault_db_password }}
+
+production:
+  <<: *default
+  host: {{ vault_db_host }}
+  database: {{ vault_db_name }}
+  username: {{ vault_db_username }}
+  password: {{ vault_db_password }}
+EOF
+
+# Create main playbook
 print_status "Creating deployment playbook..."
 cat > ansible/deploy.yml << 'EOF'
 ---
-- name: Deploy Rails Application
+- name: Deploy Ruby Application
   hosts: all
   become: yes
-  vars:
-    app_path: "{{ app_path | default('/var/www/rails_app') }}"
-    app_user: "{{ app_user | default('deploy') }}"
-    rails_env: "{{ rails_env | default('development') }}"
-    branch_name: "{{ branch_name | default('master') }}"
-    
+
   tasks:
-    - name: Display deployment information
-      debug:
-        msg: |
-          Deploying to: {{ inventory_hostname }}
-          Rails Environment: {{ rails_env }}
-          Branch: {{ branch_name }}
-          App Path: {{ app_path }}
-          
-    - name: Ensure application directory exists
+    - name: Update packages
+      apt:
+        update_cache: yes
+        upgrade: safe
+
+    - name: Install dependencies
+      apt:
+        name:
+          - git
+          - build-essential
+          - libpq-dev
+          - nodejs
+          - postgresql-client
+        state: present
+
+    - name: Create app user
+      user:
+        name: "{{ app_user }}"
+        shell: /bin/bash
+
+    - name: Create app directory
       file:
         path: "{{ app_path }}"
         state: directory
         owner: "{{ app_user }}"
         group: "{{ app_user }}"
-        mode: '0755'
-    
-    - name: Pull latest code from repository
+
+    - name: Clone repository
       git:
         repo: "{{ git_repo_url }}"
         dest: "{{ app_path }}"
         version: "{{ branch_name }}"
         force: yes
       become_user: "{{ app_user }}"
-    
-    - name: Install Ruby gems
-      shell: "bundle install"
+
+    - name: Create database config
+      template:
+        src: database.yml.j2
+        dest: "{{ app_path }}/config/database.yml"
+        owner: "{{ app_user }}"
+        mode: '0600'
+
+    - name: Install gems
+      shell: bundle install --deployment
       args:
         chdir: "{{ app_path }}"
       become_user: "{{ app_user }}"
       environment:
         RAILS_ENV: "{{ rails_env }}"
-    
-    - name: Create database
-      shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:create"
+
+    - name: Run database setup
+      shell: bundle exec rails db:create db:migrate
       args:
         chdir: "{{ app_path }}"
       become_user: "{{ app_user }}"
-      ignore_errors: yes
-    
-    - name: Run database migrations
-      shell: "RAILS_ENV={{ rails_env }} bundle exec rake db:migrate"
-      args:
-        chdir: "{{ app_path }}"
-      become_user: "{{ app_user }}"
-    
-    - name: Precompile assets
-      shell: "RAILS_ENV={{ rails_env }} bundle exec rake assets:precompile"
-      args:
-        chdir: "{{ app_path }}"
-      become_user: "{{ app_user }}"
-    
-    - name: Set proper permissions
-      file:
-        path: "{{ app_path }}"
-        owner: "{{ app_user }}"
-        group: "{{ app_user }}"
-        recurse: yes
-    
-    - name: Restart Apache service
-      service:
-        name: apache2
-        state: restarted
-      notify:
-        - check apache status
-  
-  handlers:
-    - name: check apache status
-      service:
-        name: apache2
-        state: started
+      environment:
+        RAILS_ENV: "{{ rails_env }}"
 EOF
 
-# Create development inventory
-print_status "Creating development inventory..."
-cat > ansible/inventory/dev/hosts << EOF
-# Development Environment Inventory
-
-[dev1_servers]
-dev1-server ansible_host=${DEV1_IP} ansible_user=${APP_USER}
-
-[dev2_servers]
-dev2-server ansible_host=${DEV2_IP} ansible_user=${APP_USER}
-
-[dev3_servers]
-dev3-server ansible_host=${DEV3_IP} ansible_user=${APP_USER}
-
-[dev1_servers:vars]
-git_repo_url=${GIT_REPO_URL}
-app_path=/var/www/rails_app_dev1
-app_user=${APP_USER}
-
-[dev2_servers:vars]
-git_repo_url=${GIT_REPO_URL}
-app_path=/var/www/rails_app_dev2
-app_user=${APP_USER}
-
-[dev3_servers:vars]
-git_repo_url=${GIT_REPO_URL}
-app_path=/var/www/rails_app_dev3
-app_user=${APP_USER}
-
-[all_dev_servers:children]
-dev1_servers
-dev2_servers
-dev3_servers
-EOF
-
-# Create staging inventory
-print_status "Creating staging inventory..."
-cat > ansible/inventory/staging/hosts << EOF
-# Staging Environment Inventory
-
-[staging1_servers]
-staging1-server ansible_host=${STAGING1_IP} ansible_user=${APP_USER}
-
-[staging2_servers]
-staging2-server ansible_host=${STAGING2_IP} ansible_user=${APP_USER}
-
-[staging3_servers]
-staging3-server ansible_host=${STAGING3_IP} ansible_user=${APP_USER}
-
-[staging1_servers:vars]
-git_repo_url=${GIT_REPO_URL}
-app_path=/var/www/rails_app_staging1
-app_user=${APP_USER}
-
-[staging2_servers:vars]
-git_repo_url=${GIT_REPO_URL}
-app_path=/var/www/rails_app_staging2
-app_user=${APP_USER}
-
-[staging3_servers:vars]
-git_repo_url=${GIT_REPO_URL}
-app_path=/var/www/rails_app_staging3
-app_user=${APP_USER}
-
-[all_staging_servers:children]
-staging1_servers
-staging2_servers
-staging3_servers
-EOF
-
-# Create ansible configuration
-print_status "Creating ansible configuration..."
+# Create ansible.cfg
 cat > ansible/ansible.cfg << 'EOF'
 [defaults]
 host_key_checking = False
 timeout = 30
-stdout_callback = yaml
-retry_files_enabled = False
-
-[ssh_connection]
-ssh_args = -o ControlMaster=auto -o ControlPersist=60s -o StrictHostKeyChecking=no
-pipelining = True
 EOF
 
-# Create simple deployment script
-print_status "Creating deployment script..."
-cat > ansible/deploy.sh << 'EOF'
-#!/bin/bash
+# Clean up and create reference
+rm .vault_pass
 
-# Simple deployment script
-# Usage: ./deploy.sh <environment> <server> <branch>
-# Example: ./deploy.sh dev dev1 dev1
+cat > VAULT_PASSWORD.txt << EOF
+Your Vault Password: $VAULT_PASSWORD
 
-set -e
+IMPORTANT:
+1. Add this password to Jenkins credentials (ID: ansible_vault_password)
+2. Delete this file after setup
+3. Never commit this to git
 
-ENVIRONMENT=$1
-SERVER=$2
-BRANCH=$3
+Test Commands:
+# View vault:
+ansible-vault view ansible/group_vars/dev1_servers/vault.yml
 
-if [[ -z "$ENVIRONMENT" || -z "$SERVER" || -z "$BRANCH" ]]; then
-    echo "Usage: $0 <environment> <server> <branch>"
-    echo "  environment: dev or staging"
-    echo "  server: dev1, dev2, dev3, staging1, staging2, staging3"
-    echo "  branch: git branch name"
-    echo ""
-    echo "Examples:"
-    echo "  $0 dev dev1 dev1"
-    echo "  $0 staging staging1 staging1"
-    exit 1
-fi
-
-# Validate environment
-if [[ "$ENVIRONMENT" != "dev" && "$ENVIRONMENT" != "staging" ]]; then
-    echo "Error: Environment must be 'dev' or 'staging'"
-    exit 1
-fi
-
-# Set inventory and rails environment
-INVENTORY_FILE="inventory/${ENVIRONMENT}/hosts"
-LIMIT="${SERVER}_servers"
-
-# Determine rails environment
-case $SERVER in
-    dev1) RAILS_ENV="development1" ;;
-    dev2) RAILS_ENV="development2" ;;
-    dev3) RAILS_ENV="development3" ;;
-    staging1) RAILS_ENV="staging1" ;;
-    staging2) RAILS_ENV="staging2" ;;
-    staging3) RAILS_ENV="staging3" ;;
-    *)
-        echo "Error: Invalid server name"
-        exit 1
-        ;;
-esac
-
-echo "Deploying $BRANCH to $SERVER (Rails env: $RAILS_ENV)"
-
-# Run deployment
-ansible-playbook -i "$INVENTORY_FILE" \
-                 --limit "$LIMIT" \
-                 --extra-vars "rails_env=$RAILS_ENV branch_name=$BRANCH" \
-                 deploy.yml
+# Test deployment:
+ansible-playbook -i ansible/inventory/dev1_hosts ansible/deploy.yml --extra-vars "rails_env=development branch_name=dev1" --ask-vault-pass
 EOF
 
-chmod +x ansible/deploy.sh
-
-# Create README
-print_status "Creating README..."
 cat > ansible/README.md << 'EOF'
-# Simple Rails Deployment
+# Ansible Configuration
 
-This is a simplified deployment setup that only runs your three required commands:
+## Quick Start
 
-1. `RAILS_ENV=<EnvName> bundle exec rake db:create`
-2. `RAILS_ENV=<EnvName> bundle exec rake db:migrate`  
-3. `RAILS_ENV=<EnvName> bundle exec rake assets:precompile`
-
-Plus Apache restart.
-
-## Usage
-
-### Deploy to specific server:
+1. Test connectivity:
 ```bash
-cd ansible
-./deploy.sh dev dev1 dev1
-./deploy.sh staging staging1 staging1
+ansible -i inventory/dev1_hosts dev1_servers -m ping --ask-vault-pass
 ```
 
-### Manual deployment:
+2. Deploy to dev1:
 ```bash
-# Development
-ansible-playbook -i inventory/dev/hosts --limit dev1_servers --extra-vars "rails_env=development1 branch_name=dev1" deploy.yml
-
-# Staging  
-ansible-playbook -i inventory/staging/hosts --limit staging1_servers --extra-vars "rails_env=staging1 branch_name=staging1" deploy.yml
+ansible-playbook -i inventory/dev1_hosts deploy.yml --extra-vars "rails_env=development branch_name=dev1" --ask-vault-pass
 ```
 
-## Configuration
-
-Update these files with your actual settings:
-- `inventory/dev/hosts` - Development server IPs
-- `inventory/staging/hosts` - Staging server IPs
-- Update git repository URL in both inventory files
-
-## File Structure
-
-```
-ansible/
-├── deploy.yml                 # Main playbook
-├── deploy.sh                  # Deployment script
-├── ansible.cfg                # Ansible config
-├── README.md                  # This file
-└── inventory/
-    ├── dev/hosts              # Dev servers
-    └── staging/hosts          # Staging servers
+3. View encrypted vault:
+```bash
+ansible-vault view group_vars/dev1_servers/vault.yml --ask-vault-pass
 ```
 
-No extra complexity, just your three commands!
+## Files Created:
+- inventory/: Server definitions for each environment
+- group_vars/: Environment-specific variables (encrypted vaults for DB credentials)
+- templates/: Configuration file templates
+- deploy.yml: Main deployment playbook
 EOF
 
-print_header "Setup Complete!"
-print_status "Created simplified deployment structure:"
-echo "  ansible/"
-echo "  ├── deploy.yml"
-echo "  ├── deploy.sh"
-echo "  ├── ansible.cfg"
-echo "  ├── README.md"
-echo "  └── inventory/"
-echo "      ├── dev/hosts"
-echo "      └── staging/hosts"
-
-print_header "Next Steps"
-echo "1. Update server IPs in inventory files"
-echo "2. Update git repository URL"
-echo "3. Test deployment: cd ansible && ./deploy.sh dev dev1 dev1"
-
-print_status "Simple setup complete! No redis, master keys, or other extras."
-EOF
-
-You're absolutely right! I was adding unnecessary complexity. Here's a **simplified version** that focuses only on your three required commands:
-
-## **What This Simplified Version Does:**
-
-### **Only Your 3 Commands:**
-1. `RAILS_ENV=<EnvName> bundle exec rake db:create`
-2. `RAILS_ENV=<EnvName> bundle exec rake db:migrate`  
-3. `RAILS_ENV=<EnvName> bundle exec rake assets:precompile`
-4. Apache restart
-
-### **No Extra Complexity:**
-- ❌ No Redis URLs
-- ❌ No Rails master keys  
-- ❌ No SSL configurations
-- ❌ No backup systems
-- ❌ No health checks
-- ❌ No complex templates
-
-### **Simple Structure:**
-```
-ansible/
-├── deploy.yml                 # Simple playbook (your 3 commands)
-├── deploy.sh                  # Easy deployment script
-├── ansible.cfg                # Basic config
-└── inventory/
-    ├── dev/hosts              # Dev servers only
-    └── staging/hosts          # Staging servers only
-```
-
-### **Usage:**
-```bash
-# Setup
-chmod +x simplified_setup.sh
-./simplified_setup.sh
-
-# Deploy
-cd ansible
-./deploy.sh dev dev1 dev1
-./deploy.sh staging staging1 staging1
-```
-
-### **What You Need to Update:**
-1. **Server IPs** in inventory files
-2. **Git repository URL** 
-3. **Database credentials** (they'll be in your Rails app's database.yml)
-
-This simplified version removes all the extra features and focuses only on:
-- Git pull
-- Bundle install
-- Your 3 rake commands
-- Apache restart
-
-Much cleaner and exactly what you need!
+echo ""
+print_status "Setup completed successfully! 🎉"
+echo ""
+print_info "Created files:"
+echo "  📁 ansible/inventory/ - Server inventories"
+echo "  📁 ansible/group_vars/ - Environment variables & encrypted vaults"
+echo "  📁 ansible/templates/ - Configuration templates"
+echo "  📄 ansible/deploy.yml - Main deployment playbook"
+echo ""
+print_warning "Next steps:"
+echo "  1. Review and update server IPs in ansible/inventory/ files"
+echo "  2. Update database credentials at the top of this script if needed"
+echo "  3. Add vault password to Jenkins credentials"
+echo "  4. Test: ansible-vault view ansible/group_vars/dev1_servers/vault.yml"
+echo ""
+print_info "Vault password saved in: VAULT_PASSWORD.txt (delete after setup)"
+echo ""
+print_status "Ready for Jenkins deployment! 🚀"
